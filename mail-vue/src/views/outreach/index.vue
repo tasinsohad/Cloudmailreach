@@ -1099,9 +1099,12 @@ async function runAutoPilotTest() {
       campaignType: testLead.campaignType,
       settings
     });
-    if (res.code === 200 && res.data) {
-      testResult.value = res.data;
+    const payload = res?.data || res;
+    if (payload && payload.subject && payload.body) {
+      testResult.value = payload;
       ElMessage.success('Email copy generated autonomously!');
+    } else {
+      ElMessage.warning('No response generated. Please check your active LLM settings.');
     }
   } catch (err) {
     ElMessage.error(err.message || 'Failed to generate preview');
@@ -1301,29 +1304,30 @@ const replyRate = computed(() => {
 async function fetchData() {
   loading.value = true;
   try {
-    const res = await getOutreachDashboard();
-    if (res.code === 200 && res.data) {
-      autoPilotEnabled.value = Boolean(res.data.autopilot);
-      Object.assign(stats, res.data.stats);
-      campaigns.value = (res.data.campaigns || []).map(c => ({
+    const raw = await getOutreachDashboard();
+    const data = raw?.data || raw;
+    if (data) {
+      autoPilotEnabled.value = Boolean(data.autopilot);
+      Object.assign(stats, data.stats || {});
+      campaigns.value = (data.campaigns || []).map(c => ({
         ...c,
         activeBool: Boolean(c.status)
       }));
-      recentReplies.value = res.data.recentReplies || [];
-      inboxes.value = (res.data.accounts || []).map(a => ({
+      recentReplies.value = data.recentReplies || [];
+      inboxes.value = (data.accounts || []).map(a => ({
         ...a,
         tempLimit: a.daily_send_limit ?? 30,
         saving: false
       }));
-      if (res.data.telegram) {
-        telegramForm.tgBotToken = res.data.telegram.tgBotToken;
-        telegramForm.tgChatId = res.data.telegram.tgChatId;
-        telegramForm.configured = res.data.telegram.configured;
+      if (data.telegram) {
+        telegramForm.tgBotToken = data.telegram.tgBotToken;
+        telegramForm.tgChatId = data.telegram.tgChatId;
+        telegramForm.configured = data.telegram.configured;
       }
 
       // Populate LLM provider configurations
-      if (Array.isArray(res.data.llmConfigs)) {
-        res.data.llmConfigs.forEach(cfg => {
+      if (Array.isArray(data.llmConfigs)) {
+        data.llmConfigs.forEach(cfg => {
           const prov = llmProviders.value.find(p => p.id === cfg.provider);
           if (prov) {
             prov.config = cfg;
@@ -1381,11 +1385,12 @@ async function handleTestConnection() {
       baseUrl: currentLlm.baseUrl,
       selectedModel: currentLlm.selectedModel
     });
-    testConnectionResult.value = res;
-    if (res.success) {
-      ElMessage.success(res.message || 'API connection verified successfully!');
+    const result = res?.data || res || {};
+    testConnectionResult.value = result;
+    if (result.success) {
+      ElMessage.success(result.message || 'API connection verified successfully!');
     } else {
-      ElMessage.error(res.error || 'API connection failed');
+      ElMessage.error(result.error || 'API connection failed');
     }
   } catch (err) {
     testConnectionResult.value = { success: false, error: err.message };
@@ -1432,12 +1437,15 @@ async function handleFetchModels() {
   fetchingModels.value = true;
   try {
     const res = await fetchLlmModels(currentLlm.provider, currentLlm.apiKey, currentLlm.baseUrl);
-    if (res.code === 200 && Array.isArray(res.models)) {
-      currentLlm.modelsList = res.models;
-      if (res.models.length > 0 && !currentLlm.selectedModel) {
-        currentLlm.selectedModel = res.models[0].id;
+    const models = res?.models || res?.data?.models || (Array.isArray(res) ? res : []);
+    if (Array.isArray(models) && models.length > 0) {
+      currentLlm.modelsList = models;
+      if (!currentLlm.selectedModel) {
+        currentLlm.selectedModel = models[0].id;
       }
-      ElMessage.success(`Discovered ${res.models.length} models for ${currentProviderMeta.value?.name}`);
+      ElMessage.success(`Discovered ${models.length} models for ${currentProviderMeta.value?.name}`);
+    } else {
+      ElMessage.warning(`No models returned for ${currentProviderMeta.value?.name}`);
     }
   } catch (err) {
     ElMessage.error(err.message || 'Failed to fetch models from provider');
@@ -1557,9 +1565,8 @@ async function loadLeads() {
       status: filterStatus.value || undefined,
       limit: 100
     });
-    if (res.code === 200) {
-      leadsList.value = res.data || [];
-    }
+    const leads = res?.leads || res?.data || (Array.isArray(res) ? res : []);
+    leadsList.value = leads;
   } catch (err) {
     ElMessage.error(err.message || 'Failed to load leads list');
   } finally {

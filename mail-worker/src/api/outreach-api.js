@@ -868,6 +868,9 @@ app.post('/outreach/llm/fetch-models', async (c) => {
 	return c.json({
 		code: 200,
 		message: `Found ${models.length} models for ${provider}`,
+		data: {
+			models
+		},
 		models
 	});
 });
@@ -899,7 +902,11 @@ app.post('/outreach/llm/save-config', async (c) => {
 		typeof priority === 'number' ? priority : 10
 	).run();
 
-	return c.json({ code: 200, message: `${provider} configuration saved successfully` });
+	return c.json({ 
+		code: 200, 
+		message: `${provider} configuration saved successfully`,
+		data: { provider, selectedModel, isActive }
+	});
 });
 
 // 12b. LLM: Toggle Active Status in Failover Pool
@@ -913,7 +920,11 @@ app.post('/outreach/llm/toggle-active', async (c) => {
 		WHERE provider = ?
 	`).bind(isActive ? 1 : 0, provider).run();
 
-	return c.json({ code: 200, message: `${provider} is now ${isActive ? 'active in failover pool' : 'disabled'}` });
+	return c.json({ 
+		code: 200, 
+		message: `${provider} is now ${isActive ? 'active in failover pool' : 'disabled'}`,
+		data: { provider, isActive }
+	});
 });
 
 // 12c. LLM: Reorder Failover Chain Priorities
@@ -928,7 +939,11 @@ app.post('/outreach/llm/reorder', async (c) => {
 			`).bind(i + 1, providers[i]).run();
 		}
 	}
-	return c.json({ code: 200, message: 'Failover priority order updated' });
+	return c.json({ 
+		code: 200, 
+		message: 'Failover priority order updated',
+		data: { providers }
+	});
 });
 
 // 12d. LLM: Live Connection & Latency Test for Provider
@@ -950,7 +965,12 @@ app.post('/outreach/llm/test-provider', async (c) => {
 	}
 
 	if (!key && provider !== 'custom') {
-		return c.json({ code: 400, success: false, error: 'No API key configured for this provider yet.' });
+		return c.json({ 
+			code: 400, 
+			success: false, 
+			error: 'No API key configured for this provider yet.',
+			data: { success: false, error: 'No API key configured for this provider yet.' }
+		});
 	}
 
 	const startTime = Date.now();
@@ -970,7 +990,13 @@ app.post('/outreach/llm/test-provider', async (c) => {
 			success: true,
 			latencyMs: latency,
 			message: `Connected successfully (${latency}ms latency)!`,
-			preview: (result || '').slice(0, 150)
+			preview: (result || '').slice(0, 150),
+			data: {
+				success: true,
+				latencyMs: latency,
+				message: `Connected successfully (${latency}ms latency)!`,
+				preview: (result || '').slice(0, 150)
+			}
 		});
 	} catch (err) {
 		const latency = Date.now() - startTime;
@@ -978,7 +1004,12 @@ app.post('/outreach/llm/test-provider', async (c) => {
 			code: 200,
 			success: false,
 			latencyMs: latency,
-			error: err.message || 'Connection test failed'
+			error: err.message || 'Connection test failed',
+			data: {
+				success: false,
+				latencyMs: latency,
+				error: err.message || 'Connection test failed'
+			}
 		});
 	}
 });

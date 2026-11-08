@@ -66,7 +66,7 @@ http.interceptors.response.use((res) => {
                 })
                 reject(data)
             }
-            resolve(data.data)
+            resolve(data.data !== undefined ? data.data : data)
         })
     },
     (error) => {
