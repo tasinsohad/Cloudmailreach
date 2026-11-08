@@ -11,5 +11,6 @@ export const account = sqliteTable('account', {
 	allReceive: integer('all_receive').default(0).notNull(),
 	sort: integer('sort').default(0).notNull(),
 	isDel: integer('is_del').default(0).notNull(),
+	dailySendLimit: integer('daily_send_limit').default(30),
 });
 export default account

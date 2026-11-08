@@ -3,6 +3,8 @@ import userContext from '../security/user-context';
 import emailService from '../service/email-service';
 import settingService from '../service/setting-service';
 import BizError from '../error/biz-error';
+import dayjs from 'dayjs';
+import kvConst from '../const/kv-const';
 
 // Helper: fetch models from LLM providers
 async function fetchProviderModels(provider, apiKey, baseUrl) {
@@ -162,7 +164,7 @@ app.get('/outreach/dashboard', async (c) => {
 				SUM(CASE WHEN status = 'bounced' THEN 1 ELSE 0 END) as bounced_count
 			FROM outreach_lead
 		`).first(),
-		db.prepare(`SELECT account_id, email, name, status FROM account WHERE is_del = 0 ORDER BY account_id ASC`).all(),
+		db.prepare(`SELECT account_id, email, name, status, daily_send_limit FROM account WHERE is_del = 0 ORDER BY account_id ASC`).all(),
 		db.prepare(`
 			SELECT l.lead_id, l.target_email, l.target_name, l.company, l.source, l.sender_email, l.subject, l.reply_time, l.reply_email_id, c.name as campaign_name, c.type as campaign_type
 			FROM outreach_lead l
@@ -178,12 +180,27 @@ app.get('/outreach/dashboard', async (c) => {
 	const resendDomains = ['technetocrat.org', 'swiftsuretech.com'];
 	const brevoDomains = ['nccwtech.com', 'saiftechnology.com'];
 
+	const dateStr = dayjs().format('YYYY-MM-DD');
+	const rawAccounts = accountsRes.results || [];
+	const accountsWithStats = await Promise.all(rawAccounts.map(async (acc) => {
+		const accId = acc.account_id || acc.accountId;
+		const accountDailyKey = kvConst.SEND_DAY_COUNT + 'account:' + accId + ':' + dateStr;
+		const sentToday = Number(await c.env.kv.get(accountDailyKey) || 0);
+		const limit = acc.daily_send_limit ?? 30;
+		return {
+			...acc,
+			daily_send_limit: limit,
+			sent_today: sentToday,
+			remaining: Math.max(0, limit - sentToday)
+		};
+	}));
+
 	return c.json({
 		code: 200,
 		data: {
 			campaigns: campaignsRes.results || [],
 			stats: leadsStatsRes || { total_leads: 0, queued_count: 0, sent_count: 0, replied_count: 0, bounced_count: 0 },
-			accounts: accountsRes.results || [],
+			accounts: accountsWithStats,
 			domains: {
 				all: domains,
 				resend: resendDomains,
@@ -394,12 +411,38 @@ app.post('/outreach/dispatch-batch', async (c) => {
 		return c.json({ code: 200, message: 'Queue is empty', sentCount: 0 });
 	}
 
+	const dateStr = dayjs().format('YYYY-MM-DD');
 	const accountsRes = await c.env.db.prepare(`
-		SELECT account_id, email, name FROM account WHERE is_del = 0 ORDER BY sort ASC
+		SELECT account_id, email, name, daily_send_limit FROM account WHERE is_del = 0 ORDER BY sort ASC
 	`).all();
-	const accounts = accountsRes.results || [];
-	if (accounts.length === 0) {
+	const allAccounts = accountsRes.results || [];
+	if (allAccounts.length === 0) {
 		throw new BizError('No active inboxes available for sending');
+	}
+
+	// Filter inboxes with daily limit remaining
+	const eligibleAccounts = [];
+	for (const acc of allAccounts) {
+		const accId = acc.account_id || acc.accountId;
+		const accountDailyKey = kvConst.SEND_DAY_COUNT + 'account:' + accId + ':' + dateStr;
+		const sentToday = Number(await c.env.kv.get(accountDailyKey) || 0);
+		const limit = acc.daily_send_limit ?? 30;
+		if (sentToday < limit) {
+			eligibleAccounts.push({
+				...acc,
+				accountId: accId,
+				sentToday,
+				limit
+			});
+		}
+	}
+
+	if (eligibleAccounts.length === 0) {
+		return c.json({
+			code: 429,
+			message: 'All inboxes have reached their daily sending limits for today. Increase the limits or wait for tomorrow.',
+			sentCount: 0
+		});
 	}
 
 	let sentSuccess = 0;
@@ -407,9 +450,23 @@ app.post('/outreach/dispatch-batch', async (c) => {
 	let lastError = null;
 
 	for (const lead of leads) {
-		const senderAccount = accounts[accountIdx % accounts.length];
-		accountIdx++;
-		const accountId = senderAccount.account_id || senderAccount.accountId;
+		// Find next account that still has remaining quota
+		let senderAccount = null;
+		for (let attempt = 0; attempt < eligibleAccounts.length; attempt++) {
+			const candidate = eligibleAccounts[accountIdx % eligibleAccounts.length];
+			accountIdx++;
+			if (candidate.sentToday < candidate.limit) {
+				senderAccount = candidate;
+				break;
+			}
+		}
+
+		if (!senderAccount) {
+			console.log('All eligible inboxes exhausted quota during batch.');
+			break;
+		}
+
+		const accountId = senderAccount.accountId;
 
 		try {
 			await emailService.send(c, {
@@ -422,6 +479,8 @@ app.post('/outreach/dispatch-batch', async (c) => {
 				sendType: 'new',
 				attachments: []
 			}, 1);
+
+			senderAccount.sentToday++;
 
 			await c.env.db.prepare(`
 				UPDATE outreach_lead 
@@ -563,4 +622,38 @@ app.post('/outreach/telegram/test', async (c) => {
 	}
 
 	return c.json({ code: 200, message: 'Test message sent to Telegram successfully!' });
+});
+
+// 15. Update daily sending limit for single inbox
+app.post('/outreach/inbox/update-limit', async (c) => {
+	const { accountId, dailyLimit } = await c.req.json();
+	if (!accountId || dailyLimit === undefined || dailyLimit === null) {
+		throw new BizError('Account ID and daily limit are required');
+	}
+	const limitNum = Math.max(0, parseInt(dailyLimit, 10));
+	await c.env.db.prepare(`
+		UPDATE account SET daily_send_limit = ? WHERE account_id = ?
+	`).bind(limitNum, accountId).run();
+
+	return c.json({ code: 200, message: `Updated daily limit to ${limitNum} emails/day` });
+});
+
+// 16. Batch update daily sending limit for all inboxes (or filtered by domain)
+app.post('/outreach/inbox/batch-limit', async (c) => {
+	const { dailyLimit, domain } = await c.req.json();
+	if (dailyLimit === undefined || dailyLimit === null) {
+		throw new BizError('Daily limit is required');
+	}
+	const limitNum = Math.max(0, parseInt(dailyLimit, 10));
+	if (domain) {
+		await c.env.db.prepare(`
+			UPDATE account SET daily_send_limit = ? WHERE is_del = 0 AND email LIKE ?
+		`).bind(limitNum, `%@${domain}`).run();
+	} else {
+		await c.env.db.prepare(`
+			UPDATE account SET daily_send_limit = ? WHERE is_del = 0
+		`).bind(limitNum).run();
+	}
+
+	return c.json({ code: 200, message: `Successfully updated daily limit to ${limitNum} emails/day` });
 });

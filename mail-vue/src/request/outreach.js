@@ -55,3 +55,11 @@ export function fetchLlmModels(provider, apiKey, baseUrl) {
 export function saveLlmConfig(data) {
     return http.post('/outreach/llm/save-config', data);
 }
+
+export function updateInboxLimit(accountId, dailyLimit) {
+    return http.post('/outreach/inbox/update-limit', { accountId, dailyLimit });
+}
+
+export function batchUpdateInboxLimits(dailyLimit, domain) {
+    return http.post('/outreach/inbox/batch-limit', { dailyLimit, domain });
+}

@@ -102,6 +102,121 @@
               </div>
             </div>
 
+            <!-- Inbox Daily Sending Limits & Quota Protection -->
+            <div class="section-card">
+              <div class="section-header">
+                <div class="section-title">
+                  <Icon icon="fluent:mail-clock-20-regular" width="20" height="20" />
+                  <span>Inbox Daily Sending Limits & Quota Protection</span>
+                </div>
+                <div class="inbox-batch-controls">
+                  <span class="batch-label">Set Limit:</span>
+                  <el-input-number 
+                    v-model="batchLimitVal" 
+                    :min="1" 
+                    :max="500" 
+                    size="small" 
+                    style="width: 100px; margin-right: 8px;" 
+                  />
+                  <el-button 
+                    type="primary" 
+                    size="small" 
+                    :loading="applyingBatchLimit"
+                    @click="handleApplyBatchLimit"
+                  >
+                    Apply to {{ inboxesDomainFilter === 'all' ? 'All Inboxes' : inboxesDomainFilter }}
+                  </el-button>
+                </div>
+              </div>
+
+              <div class="inbox-filter-bar">
+                <el-radio-group v-model="inboxesDomainFilter" size="small">
+                  <el-radio-button value="all">All Domains (20)</el-radio-button>
+                  <el-radio-button value="technetocrat.org">technetocrat.org</el-radio-button>
+                  <el-radio-button value="swiftsuretech.com">swiftsuretech.com</el-radio-button>
+                  <el-radio-button value="nccwtech.com">nccwtech.com</el-radio-button>
+                  <el-radio-button value="saiftechnology.com">saiftechnology.com</el-radio-button>
+                </el-radio-group>
+              </div>
+
+              <el-table :data="filteredInboxes" style="width: 100%" stripe class="inboxes-table">
+                <el-table-column prop="email" label="Inbox Email" min-width="210">
+                  <template #default="{ row }">
+                    <div class="inbox-cell">
+                      <div class="inbox-email">{{ row.email }}</div>
+                      <div class="inbox-name">{{ row.name || 'Tasin Sohad' }}</div>
+                    </div>
+                  </template>
+                </el-table-column>
+
+                <el-table-column label="Relay Provider" width="150">
+                  <template #default="{ row }">
+                    <el-tag 
+                      size="small" 
+                      :type="['nccwtech.com', 'saiftechnology.com'].some(d => row.email.endsWith('@' + d)) ? 'warning' : 'primary'"
+                    >
+                      {{ ['nccwtech.com', 'saiftechnology.com'].some(d => row.email.endsWith('@' + d)) ? 'Brevo API' : 'Resend' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+
+                <el-table-column label="Today's Outbound Quota" min-width="210">
+                  <template #default="{ row }">
+                    <div class="quota-usage">
+                      <div class="quota-numbers">
+                        <span><strong>{{ row.sent_today || 0 }}</strong> / {{ row.daily_send_limit || 30 }} sent</span>
+                        <span class="quota-rem" :class="{ 'quota-exhausted': (row.remaining || 0) <= 0 }">
+                          {{ row.remaining !== undefined ? row.remaining : Math.max(0, (row.daily_send_limit || 30) - (row.sent_today || 0)) }} left
+                        </span>
+                      </div>
+                      <el-progress 
+                        :percentage="Math.min(100, Math.round(((row.sent_today || 0) / (row.daily_send_limit || 30)) * 100))"
+                        :status="(row.sent_today || 0) >= (row.daily_send_limit || 30) ? 'exception' : ((row.sent_today || 0) / (row.daily_send_limit || 30) > 0.8 ? 'warning' : 'success')"
+                        :show-text="false"
+                        :stroke-width="6"
+                      />
+                    </div>
+                  </template>
+                </el-table-column>
+
+                <el-table-column label="Daily Sending Limit" width="190" align="center">
+                  <template #default="{ row }">
+                    <div class="limit-input-wrapper">
+                      <el-input-number 
+                        v-model="row.tempLimit" 
+                        :min="1" 
+                        :max="500" 
+                        size="small" 
+                        controls-position="right"
+                        style="width: 90px; margin-right: 6px;"
+                      />
+                      <el-button 
+                        type="primary" 
+                        size="small" 
+                        plain
+                        :loading="row.saving"
+                        :disabled="row.tempLimit === row.daily_send_limit"
+                        @click="handleSaveInboxLimit(row)"
+                      >
+                        Save
+                      </el-button>
+                    </div>
+                  </template>
+                </el-table-column>
+
+                <el-table-column label="Status" width="130" align="center">
+                  <template #default="{ row }">
+                    <el-tag 
+                      size="small" 
+                      :type="(row.sent_today || 0) >= (row.daily_send_limit || 30) ? 'danger' : 'success'"
+                    >
+                      {{ (row.sent_today || 0) >= (row.daily_send_limit || 30) ? 'Limit Reached' : 'Active' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+
             <!-- Active Campaigns List -->
             <div class="section-card">
               <div class="section-header">
@@ -637,7 +752,9 @@ import {
   updateTelegramSettings, 
   testTelegramSettings,
   fetchLlmModels,
-  saveLlmConfig
+  saveLlmConfig,
+  updateInboxLimit,
+  batchUpdateInboxLimits
 } from '@/request/outreach.js';
 
 const router = useRouter();
@@ -673,6 +790,49 @@ const stats = reactive({
 const campaigns = ref([]);
 const recentReplies = ref([]);
 const leadsList = ref([]);
+const inboxes = ref([]);
+const inboxesDomainFilter = ref('all');
+const batchLimitVal = ref(30);
+const applyingBatchLimit = ref(false);
+
+const filteredInboxes = computed(() => {
+  if (inboxesDomainFilter.value === 'all') {
+    return inboxes.value;
+  }
+  return inboxes.value.filter(a => a.email.endsWith('@' + inboxesDomainFilter.value));
+});
+
+async function handleSaveInboxLimit(inbox) {
+  inbox.saving = true;
+  try {
+    const accId = inbox.account_id || inbox.accountId;
+    await updateInboxLimit(accId, inbox.tempLimit);
+    inbox.daily_send_limit = inbox.tempLimit;
+    inbox.remaining = Math.max(0, inbox.tempLimit - (inbox.sent_today || 0));
+    ElMessage.success(`Updated limit for ${inbox.email} to ${inbox.tempLimit}/day`);
+  } catch (err) {
+    ElMessage.error(err.message || 'Failed to update inbox limit');
+  } finally {
+    inbox.saving = false;
+  }
+}
+
+async function handleApplyBatchLimit() {
+  if (!batchLimitVal.value || batchLimitVal.value < 1) {
+    return ElMessage.warning('Please enter a valid daily limit number');
+  }
+  applyingBatchLimit.value = true;
+  try {
+    const domain = inboxesDomainFilter.value === 'all' ? null : inboxesDomainFilter.value;
+    await batchUpdateInboxLimits(batchLimitVal.value, domain);
+    ElMessage.success(`Set daily limit of ${batchLimitVal.value} for ${domain ? domain : 'all'} inboxes!`);
+    await fetchData();
+  } catch (err) {
+    ElMessage.error(err.message || 'Failed to batch update limits');
+  } finally {
+    applyingBatchLimit.value = false;
+  }
+}
 
 const telegramForm = reactive({
   tgBotToken: '',
@@ -809,6 +969,11 @@ async function fetchData() {
         activeBool: Boolean(c.status)
       }));
       recentReplies.value = res.data.recentReplies || [];
+      inboxes.value = (res.data.accounts || []).map(a => ({
+        ...a,
+        tempLimit: a.daily_send_limit ?? 30,
+        saving: false
+      }));
       if (res.data.telegram) {
         telegramForm.tgBotToken = res.data.telegram.tgBotToken;
         telegramForm.tgChatId = res.data.telegram.tgChatId;
@@ -1256,6 +1421,76 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 14px;
+}
+
+.inbox-batch-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.batch-label {
+  font-size: 13px;
+  color: #697386;
+  font-weight: 500;
+}
+
+.inbox-filter-bar {
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.inboxes-table {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.inbox-cell {
+  display: flex;
+  flex-direction: column;
+}
+
+.inbox-email {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: #1a1f36;
+}
+
+.inbox-name {
+  font-size: 12px;
+  color: #8792a2;
+}
+
+.quota-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quota-numbers {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: #4f566b;
+}
+
+.quota-rem {
+  font-size: 11.5px;
+  color: #059669;
+  font-weight: 500;
+}
+
+.quota-exhausted {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.limit-input-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .domain-card {

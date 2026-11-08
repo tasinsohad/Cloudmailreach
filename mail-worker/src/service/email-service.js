@@ -398,6 +398,16 @@ const emailService = {
 			throw new BizError(t('senderAccountNotExist'));
 		}
 
+		// Enforce daily send limit per inbox
+		const dateStr = dayjs().format('YYYY-MM-DD');
+		const accountDailyKey = kvConst.SEND_DAY_COUNT + 'account:' + accountId + ':' + dateStr;
+		const accountSentToday = Number(await c.env.kv.get(accountDailyKey) || 0);
+		const inboxDailyLimit = accountRow.dailySendLimit ?? accountRow.daily_send_limit ?? 30;
+
+		if (inboxDailyLimit > 0 && (accountSentToday + receiveEmail.length > inboxDailyLimit)) {
+			throw new BizError(`Daily limit of ${inboxDailyLimit} emails reached for inbox ${accountRow.email} (${accountSentToday}/${inboxDailyLimit} sent today)`, 403);
+		}
+
 		if (accountRow.userId !== userId) {
 			throw new BizError(t('sendEmailNotCurUser'));
 		}
@@ -700,6 +710,13 @@ const emailService = {
 		} else  {
 			daySendTotal = Number(daySendTotal) + receiveEmail.length
 			await c.env.kv.put(kvConst.SEND_DAY_COUNT + dateStr, JSON.stringify(daySendTotal), { expirationTtl: 60 * 60 * 24 });
+		}
+
+		// Increment per-inbox daily sent counter
+		if (accountId) {
+			const accountDailyKey = kvConst.SEND_DAY_COUNT + 'account:' + accountId + ':' + dateStr;
+			const accToday = Number(await c.env.kv.get(accountDailyKey) || 0);
+			await c.env.kv.put(accountDailyKey, JSON.stringify(accToday + receiveEmail.length), { expirationTtl: 60 * 60 * 24 * 2 });
 		}
 
 		return emailResult;

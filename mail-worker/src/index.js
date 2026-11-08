@@ -6,6 +6,8 @@ import emailService from './service/email-service';
 import r2Service from './service/r2-service';
 import oauthService from './service/oauth-service';
 import analysisService from './service/analysis-service';
+import dayjs from 'dayjs';
+import kvConst from './const/kv-const';
 
 export default {
 	async fetch(req, env, ctx) {
@@ -68,17 +70,39 @@ export default {
 				const leads = leadsRes.results || [];
 				if (leads.length === 0) continue;
 
+				const dateStr = dayjs().format('YYYY-MM-DD');
 				const accountsRes = await env.db.prepare(`
-					SELECT account_id, email, name FROM account WHERE is_del = 0 ORDER BY sort ASC
+					SELECT account_id, email, name, daily_send_limit FROM account WHERE is_del = 0 ORDER BY sort ASC
 				`).all();
-				const accounts = accountsRes.results || [];
-				if (accounts.length === 0) continue;
+				const allAccounts = accountsRes.results || [];
+				if (allAccounts.length === 0) continue;
+
+				const eligibleAccounts = [];
+				for (const acc of allAccounts) {
+					const accId = acc.account_id || acc.accountId;
+					const accountDailyKey = kvConst.SEND_DAY_COUNT + 'account:' + accId + ':' + dateStr;
+					const sentToday = Number(await env.kv.get(accountDailyKey) || 0);
+					const limit = acc.daily_send_limit ?? 30;
+					if (sentToday < limit) {
+						eligibleAccounts.push({ ...acc, accountId: accId, sentToday, limit });
+					}
+				}
+				if (eligibleAccounts.length === 0) continue;
 
 				let accountIdx = 0;
 				for (const lead of leads) {
-					const sender = accounts[accountIdx % accounts.length];
-					accountIdx++;
-					const accountId = sender.account_id || sender.accountId;
+					let sender = null;
+					for (let attempt = 0; attempt < eligibleAccounts.length; attempt++) {
+						const candidate = eligibleAccounts[accountIdx % eligibleAccounts.length];
+						accountIdx++;
+						if (candidate.sentToday < candidate.limit) {
+							sender = candidate;
+							break;
+						}
+					}
+					if (!sender) break;
+
+					const accountId = sender.accountId;
 					try {
 						await emailService.send({ env }, {
 							accountId: accountId,
@@ -90,6 +114,8 @@ export default {
 							sendType: 'new',
 							attachments: []
 						}, 1);
+
+						sender.sentToday++;
 
 						await env.db.prepare(`
 							UPDATE outreach_lead 
