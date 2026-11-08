@@ -106,11 +106,69 @@
           </div>
         </div>
 
+        <!-- Direct Section Quick Switcher -->
+        <div class="tabs-quick-nav">
+          <button 
+            type="button" 
+            class="tab-nav-pill" 
+            :class="{ active: activeTab === 'campaigns' }" 
+            @click="activeTab = 'campaigns'"
+          >
+            <Icon icon="fluent:server-multiple-20-regular" width="16" height="16" />
+            <span>Campaigns & Limits</span>
+          </button>
+          <button 
+            type="button" 
+            class="tab-nav-pill" 
+            :class="{ active: activeTab === 'job_hunting' }" 
+            @click="activeTab = 'job_hunting'"
+          >
+            <Icon icon="fluent:hat-graduation-24-regular" width="16" height="16" />
+            <span>Career-Ops (Jobs)</span>
+          </button>
+          <button 
+            type="button" 
+            class="tab-nav-pill" 
+            :class="{ active: activeTab === 'client_hunting' }" 
+            @click="activeTab = 'client_hunting'"
+          >
+            <Icon icon="fluent:briefcase-24-regular" width="16" height="16" />
+            <span>Harvey (Clients)</span>
+          </button>
+          <button 
+            type="button" 
+            class="tab-nav-pill highlight-ai" 
+            :class="{ active: activeTab === 'llm_engine' }" 
+            @click="activeTab = 'llm_engine'"
+          >
+            <Icon icon="fluent:brain-circuit-20-regular" width="18" height="18" />
+            <span>🤖 LLM AI Settings</span>
+          </button>
+          <button 
+            type="button" 
+            class="tab-nav-pill highlight-tg" 
+            :class="{ active: activeTab === 'replies' }" 
+            @click="activeTab = 'replies'"
+          >
+            <Icon icon="fluent:alert-badge-20-regular" width="18" height="18" />
+            <span>🔔 Telegram Alerts</span>
+          </button>
+          <button 
+            type="button" 
+            class="tab-nav-pill" 
+            :class="{ active: activeTab === 'leads' }" 
+            @click="activeTab = 'leads'"
+          >
+            <Icon icon="fluent:people-list-20-regular" width="16" height="16" />
+            <span>Leads Queue</span>
+          </button>
+        </div>
+
         <!-- Main Tabbed Control Navigation -->
         <el-tabs v-model="activeTab" class="outreach-tabs">
           
           <!-- TAB 1: Campaigns & Sending Infrastructure -->
-          <el-tab-pane label="Campaigns & Inboxes" name="campaigns">
+          <el-tab-pane label="🚀 Campaigns & Inboxes" name="campaigns">
             
             <!-- Infrastructure Overview -->
             <div class="section-card">
@@ -310,7 +368,7 @@
           </el-tab-pane>
 
           <!-- TAB 2: Job Hunting Controls (Career-Ops) -->
-          <el-tab-pane label="Job Hunting Controls" name="job_hunting">
+          <el-tab-pane label="💼 Job Hunting Controls" name="job_hunting">
             <div class="section-card">
               <div class="section-header">
                 <div class="section-title">
@@ -370,7 +428,7 @@
           </el-tab-pane>
 
           <!-- TAB 3: Harvey Client Hunting Controls -->
-          <el-tab-pane label="Harvey Client Controls" name="client_hunting">
+          <el-tab-pane label="🎯 Client Hunting Controls" name="client_hunting">
             <div class="section-card">
               <div class="section-header">
                 <div class="section-title">
@@ -430,7 +488,7 @@
           </el-tab-pane>
 
           <!-- TAB 4: Harvey LLM Engine (Anthropic, NVIDIA NIM, Google, OpenAI, OpenRouter, Custom) -->
-          <el-tab-pane label="Harvey LLM Engine" name="llm_engine">
+          <el-tab-pane label="🤖 LLM AI Settings" name="llm_engine">
             <div class="section-card">
               <div class="section-header">
                 <div class="section-title">
@@ -538,7 +596,7 @@
           </el-tab-pane>
 
           <!-- TAB 5: Inbound Replies & Telegram Alerts -->
-          <el-tab-pane label="Replies & Telegram Alerts" name="replies">
+          <el-tab-pane label="🔔 Telegram Alert Settings" name="replies">
             <div class="two-column-row">
               
               <!-- Recent Replies -->
@@ -821,8 +879,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, reactive, computed, onMounted, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Icon } from '@iconify/vue';
 import { 
@@ -845,9 +903,22 @@ import {
   previewAutoPilot
 } from '@/request/outreach.js';
 
+const route = useRoute();
 const router = useRouter();
 
-const activeTab = ref('campaigns');
+const activeTab = ref(route.query.tab || 'campaigns');
+
+watch(() => route.query.tab, (newTab) => {
+  if (newTab) {
+    activeTab.value = newTab;
+  }
+});
+
+watch(activeTab, (newTab) => {
+  if (route.query.tab !== newTab) {
+    router.replace({ query: { ...route.query, tab: newTab } });
+  }
+});
 const loading = ref(false);
 const loadingLeads = ref(false);
 const dispatching = ref(false);
@@ -1571,6 +1642,78 @@ onMounted(async () => {
   font-size: 13px;
   color: #697386;
   margin-top: 4px;
+}
+
+.tabs-quick-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.tab-nav-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: #ffffff;
+  color: #475569;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.tab-nav-pill:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+
+.tab-nav-pill.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+  font-weight: 600;
+}
+
+.tab-nav-pill.highlight-ai {
+  border-color: #e9d5ff;
+}
+
+.tab-nav-pill.highlight-ai:hover {
+  background: #faf5ff;
+  border-color: #d8b4fe;
+}
+
+.tab-nav-pill.highlight-ai.active {
+  background: #7e22ce;
+  border-color: #7e22ce;
+  box-shadow: 0 2px 6px rgba(126, 34, 206, 0.28);
+}
+
+.tab-nav-pill.highlight-tg {
+  border-color: #bae6fd;
+}
+
+.tab-nav-pill.highlight-tg:hover {
+  background: #f0f9ff;
+  border-color: #7dd3fc;
+}
+
+.tab-nav-pill.highlight-tg.active {
+  background: #0284c7;
+  border-color: #0284c7;
+  box-shadow: 0 2px 6px rgba(2, 132, 199, 0.28);
 }
 
 .outreach-tabs {

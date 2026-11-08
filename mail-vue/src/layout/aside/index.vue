@@ -16,9 +16,19 @@
           <span class="menu-name" style="margin-left: 16px">{{$t('inbox')}}</span>
         </el-menu-item>
         <el-menu-item @click="router.push({name: 'outreach'})" index="outreach"
-                      :class="route.meta.name === 'outreach' ? 'choose-item' : ''">
+                      :class="route.meta.name === 'outreach' && (!route.query.tab || route.query.tab === 'campaigns') ? 'choose-item' : ''">
           <Icon icon="fluent:rocket-20-regular" width="20" height="20" />
           <span class="menu-name" style="margin-left: 16px">Outreach Hub</span>
+        </el-menu-item>
+        <el-menu-item @click="router.push({name: 'outreach', query: { tab: 'llm_engine' }})" index="outreach-llm"
+                      :class="route.meta.name === 'outreach' && route.query.tab === 'llm_engine' ? 'choose-item' : ''">
+          <Icon icon="fluent:brain-circuit-20-regular" width="20" height="20" />
+          <span class="menu-name" style="margin-left: 16px">LLM AI Settings</span>
+        </el-menu-item>
+        <el-menu-item @click="router.push({name: 'outreach', query: { tab: 'replies' }})" index="outreach-tg"
+                      :class="route.meta.name === 'outreach' && route.query.tab === 'replies' ? 'choose-item' : ''">
+          <Icon icon="fluent:alert-badge-20-regular" width="20" height="20" />
+          <span class="menu-name" style="margin-left: 16px">Telegram Alerts</span>
         </el-menu-item>
         <el-menu-item @click="router.push({name: 'send'})" index="send" v-perm="'email:send'"
                       :class="route.meta.name === 'send' ? 'choose-item' : ''">
