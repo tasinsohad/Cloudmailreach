@@ -56,6 +56,18 @@ export function saveLlmConfig(data) {
     return http.post('/outreach/llm/save-config', data);
 }
 
+export function toggleLlmActive(provider, isActive) {
+    return http.post('/outreach/llm/toggle-active', { provider, isActive });
+}
+
+export function reorderLlmChain(providers) {
+    return http.post('/outreach/llm/reorder', { providers });
+}
+
+export function testLlmProvider(data) {
+    return http.post('/outreach/llm/test-provider', data);
+}
+
 export function updateInboxLimit(accountId, dailyLimit) {
     return http.post('/outreach/inbox/update-limit', { accountId, dailyLimit });
 }

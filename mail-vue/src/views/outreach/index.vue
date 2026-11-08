@@ -493,19 +493,78 @@
               <div class="section-header">
                 <div class="section-title">
                   <Icon icon="fluent:brain-circuit-20-regular" width="22" height="22" style="color: #722ed1;" />
-                  <span>Harvey Multi-Provider LLM Brain Configuration</span>
+                  <span>Harvey Multi-Provider LLM Brain & Automatic Failover Engine</span>
                 </div>
-                <el-tag :type="activeLlmInfo ? 'success' : 'info'" size="large">
-                  Active LLM: {{ activeLlmDisplay }}
-                </el-tag>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <el-tag :type="activeLlmChain.length > 0 ? 'success' : 'warning'" size="large">
+                    {{ activeLlmDisplay }}
+                  </el-tag>
+                </div>
               </div>
 
-              <p class="section-help-text">
-                Connect your API keys across Anthropic, NVIDIA NIM, Google Gemini, OpenAI, OpenRouter, or Custom LLMs. Adding an API key lets you choose discovered models from an interactive dropdown menu.
-              </p>
+              <!-- Multi-Provider Failover Pool Visualizer -->
+              <div class="failover-pool-card">
+                <div class="failover-pool-header">
+                  <div class="failover-title-row">
+                    <Icon icon="fluent:arrow-sync-checkmark-20-regular" width="20" height="20" style="color: #059669;" />
+                    <span class="failover-title">Active Failover Sequence & Auto-Switching Pool</span>
+                  </div>
+                  <span class="failover-subtitle">
+                    Add keys from multiple providers below. Harvey attempts Priority #1 first; if any API key hits rate limits (429), quota limits, or server timeout, it automatically switches to the next active provider in real time.
+                  </span>
+                </div>
+
+                <!-- Sequence Pipeline Flow -->
+                <div class="failover-pipeline">
+                  <template v-if="activeLlmChain.length > 0">
+                    <div 
+                      v-for="(prov, idx) in activeLlmChain" 
+                      :key="prov.id" 
+                      class="pipeline-node"
+                    >
+                      <div class="pipeline-node-content">
+                        <div class="pipeline-rank-badge">
+                          {{ idx === 0 ? 'Primary #1' : `Fallback #${idx + 1}` }}
+                        </div>
+                        <div class="pipeline-node-name">{{ prov.name }}</div>
+                        <div class="pipeline-node-model">{{ prov.config?.selected_model || 'default' }}</div>
+                        <div class="pipeline-node-actions">
+                          <button 
+                            type="button" 
+                            class="node-arrow-btn" 
+                            :disabled="idx === 0" 
+                            title="Move Up in Priority"
+                            @click="moveProvider(prov.id, 'up')"
+                          >▲</button>
+                          <button 
+                            type="button" 
+                            class="node-arrow-btn" 
+                            :disabled="idx === activeLlmChain.length - 1" 
+                            title="Move Down in Priority"
+                            @click="moveProvider(prov.id, 'down')"
+                          >▼</button>
+                        </div>
+                      </div>
+                      <div class="pipeline-connector">
+                        <Icon icon="fluent:arrow-right-20-regular" width="18" height="18" />
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- Ultimate Safeguard Node -->
+                  <div class="pipeline-node final-fallback">
+                    <div class="pipeline-node-content safety-net">
+                      <div class="pipeline-rank-badge safety">Built-in Safety Net</div>
+                      <div class="pipeline-node-name">Cloudflare Workers AI</div>
+                      <div class="pipeline-node-model">llama-3.1-8b-fast</div>
+                      <div class="pipeline-status-text">Zero-Downtime Fallback</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               <!-- Provider Picker Buttons -->
-              <div class="provider-selector-grid">
+              <div class="provider-selector-grid" style="margin-top: 20px;">
                 <div 
                   v-for="p in llmProviders" 
                   :key="p.id" 
@@ -515,32 +574,62 @@
                 >
                   <div class="provider-card-top">
                     <span class="provider-card-name">{{ p.name }}</span>
-                    <el-tag v-if="p.config?.is_active" size="small" type="success" effect="dark">Active Engine</el-tag>
+                    <el-tag v-if="p.config?.is_active" size="small" type="success" effect="dark">
+                      Priority #{{ p.config?.priority ?? '-' }}
+                    </el-tag>
+                    <el-tag v-else size="small" type="info">Standby</el-tag>
                   </div>
                   <div class="provider-card-model">
                     {{ p.config?.selected_model || 'No model chosen' }}
+                  </div>
+                  <div class="provider-card-toggle" @click.stop>
+                    <el-switch 
+                      :model-value="Boolean(p.config?.is_active)"
+                      @change="(val) => handleToggleProviderActive(p, val)"
+                      size="small"
+                      active-text="In Pool"
+                      inactive-text="Off"
+                    />
                   </div>
                 </div>
               </div>
 
               <!-- Active Provider Configuration Form -->
-              <div class="provider-config-box" v-if="currentLlm">
+              <div class="provider-config-box" v-if="currentLlm" style="margin-top: 20px;">
                 <div class="config-header">
-                  <h3>Configure {{ currentProviderMeta?.name }}</h3>
+                  <div>
+                    <h3 style="margin: 0; font-size: 16.5px; font-weight: 700; color: #1e293b;">
+                      Configure {{ currentProviderMeta?.name }}
+                    </h3>
+                    <div style="font-size: 13px; color: #64748b; margin-top: 2px;">
+                      Enter API key and discover models. Enable "Active in Failover Pool" to include in the automatic redundancy chain.
+                    </div>
+                  </div>
                   <el-switch 
                     v-model="currentLlm.isActiveBool" 
-                    active-text="Set as Active Harvey LLM" 
+                    active-text="Active in Failover Pool" 
                   />
                 </div>
 
-                <el-form label-position="top">
-                  <el-form-item :label="currentProviderMeta?.name + ' API Key'" required>
-                    <el-input 
-                      v-model="currentLlm.apiKey" 
-                      placeholder="Paste your API key here..." 
-                      show-password 
-                    />
-                  </el-form-item>
+                <el-form label-position="top" style="margin-top: 18px;">
+                  <div class="form-row">
+                    <el-form-item :label="currentProviderMeta?.name + ' API Key'" class="flex-2" required>
+                      <el-input 
+                        v-model="currentLlm.apiKey" 
+                        placeholder="Paste your API key here..." 
+                        show-password 
+                      />
+                    </el-form-item>
+
+                    <el-form-item label="Failover Priority Order (1 = Primary, 2 = 1st Fallback...)" class="flex-1">
+                      <el-input-number 
+                        v-model="currentLlm.priority" 
+                        :min="1" 
+                        :max="20" 
+                        style="width: 100%;" 
+                      />
+                    </el-form-item>
+                  </div>
 
                   <el-form-item v-if="currentLlm.provider === 'custom'" label="Custom Base URL (OpenAI-compatible)" required>
                     <el-input 
@@ -580,12 +669,32 @@
                     </div>
                   </div>
 
-                  <div class="save-llm-row">
+                  <!-- Test Connection Feedback Banner -->
+                  <div v-if="testConnectionResult" class="test-conn-banner" :class="testConnectionResult.success ? 'is-success' : 'is-error'">
+                    <Icon :icon="testConnectionResult.success ? 'fluent:checkmark-circle-20-filled' : 'fluent:dismiss-circle-20-filled'" width="20" height="20" />
+                    <div>
+                      <div class="test-conn-title">{{ testConnectionResult.success ? 'API Connection Verified' : 'Connection Failed' }}</div>
+                      <div class="test-conn-msg">{{ testConnectionResult.message || testConnectionResult.error }}</div>
+                    </div>
+                  </div>
+
+                  <div class="save-llm-row" style="display: flex; gap: 12px; margin-top: 18px; justify-content: flex-end;">
+                    <el-button 
+                      type="success" 
+                      plain
+                      :loading="testingConnection" 
+                      @click="handleTestConnection"
+                    >
+                      <Icon icon="fluent:plug-connected-20-regular" width="18" height="18" style="margin-right: 6px;" />
+                      Test Connection & Ping
+                    </el-button>
+
                     <el-button 
                       type="primary" 
                       :loading="savingLlm" 
                       @click="handleSaveLlmConfig"
                     >
+                      <Icon icon="fluent:save-20-regular" width="18" height="18" style="margin-right: 6px;" />
                       Save {{ currentProviderMeta?.name }} Configuration
                     </el-button>
                   </div>
@@ -859,10 +968,24 @@
       </el-form>
 
       <div v-if="testResult" class="sim-result-box" style="margin-top: 18px; padding: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
           <el-tag size="small" type="success" effect="dark">
-            Generated by {{ testResult.provider }} ({{ testResult.model }})
+            Drafted by {{ testResult.provider }} ({{ testResult.model }})
           </el-tag>
+          <span v-if="testResult.failoverChain && testResult.failoverChain.length > 0" style="font-size: 12px; font-weight: 600; color: #d97706;">
+            ⚠️ {{ testResult.failoverChain.length }} Auto-Switch Failover(s) Triggered
+          </span>
+        </div>
+
+        <!-- Automatic Failover Sequence Notice -->
+        <div v-if="testResult.failoverChain && testResult.failoverChain.length > 0" style="margin-bottom: 12px; padding: 10px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px;">
+          <div style="font-size: 12.5px; font-weight: 600; color: #b45309; display: flex; align-items: center; gap: 6px;">
+            <Icon icon="fluent:arrow-sync-circle-20-regular" width="16" height="16" />
+            <span>Automatic Failover Trail:</span>
+          </div>
+          <div v-for="(f, fIdx) in testResult.failoverChain" :key="fIdx" style="font-size: 12px; color: #92400e; margin-top: 4px; line-height: 1.4;">
+            • <strong>{{ f.provider }}</strong> ({{ f.model }}) failed: <em>{{ f.error }}</em> ➔ Automatically switched to next provider
+          </div>
         </div>
         <div style="margin-bottom: 12px;">
           <div style="font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase;">Subject Line</div>
@@ -897,6 +1020,9 @@ import {
   testTelegramSettings,
   fetchLlmModels,
   saveLlmConfig,
+  toggleLlmActive,
+  reorderLlmChain,
+  testLlmProvider,
   updateInboxLimit,
   batchUpdateInboxLimits,
   toggleAutoPilot,
@@ -1095,22 +1221,23 @@ const currentLlm = reactive({
   baseUrl: '',
   selectedModel: '',
   modelsList: [],
-  isActiveBool: false
+  isActiveBool: false,
+  priority: 1
 });
 
 const currentProviderMeta = computed(() => {
   return llmProviders.value.find(p => p.id === selectedProviderId.value);
 });
 
-const activeLlmInfo = computed(() => {
-  const active = llmProviders.value.find(p => p.config?.is_active);
-  return active ? active.config : null;
+const activeLlmChain = computed(() => {
+  return llmProviders.value
+    .filter(p => p.config?.is_active && (p.config?.api_key || p.id === 'custom'))
+    .sort((a, b) => (a.config?.priority ?? 10) - (b.config?.priority ?? 10));
 });
 
 const activeLlmDisplay = computed(() => {
-  if (!activeLlmInfo.value) return 'None (Configure Below)';
-  const prov = llmProviders.value.find(p => p.id === activeLlmInfo.value.provider);
-  return `${prov?.name || activeLlmInfo.value.provider} — ${activeLlmInfo.value.selected_model || 'Default'}`;
+  if (activeLlmChain.value.length === 0) return 'Cloudflare Workers AI (Safety Net)';
+  return `${activeLlmChain.value.length} Active in Failover Pool`;
 });
 
 // Create Campaign Form
@@ -1212,8 +1339,12 @@ async function fetchData() {
   }
 }
 
+const testingConnection = ref(false);
+const testConnectionResult = ref(null);
+
 function selectLlmProvider(providerId) {
   selectedProviderId.value = providerId;
+  testConnectionResult.value = null;
   const prov = llmProviders.value.find(p => p.id === providerId);
   currentLlm.provider = providerId;
   if (prov && prov.config) {
@@ -1221,6 +1352,7 @@ function selectLlmProvider(providerId) {
     currentLlm.baseUrl = prov.config.base_url || '';
     currentLlm.selectedModel = prov.config.selected_model || '';
     currentLlm.isActiveBool = Boolean(prov.config.is_active);
+    currentLlm.priority = prov.config.priority ?? 10;
     try {
       currentLlm.modelsList = JSON.parse(prov.config.available_models || '[]');
     } catch (e) {
@@ -1231,7 +1363,65 @@ function selectLlmProvider(providerId) {
     currentLlm.baseUrl = '';
     currentLlm.selectedModel = '';
     currentLlm.isActiveBool = false;
+    currentLlm.priority = 10;
     currentLlm.modelsList = [];
+  }
+}
+
+async function handleTestConnection() {
+  if (!currentLlm.apiKey && currentLlm.provider !== 'custom') {
+    return ElMessage.warning(`Please enter or save your ${currentProviderMeta.value?.name} API Key first`);
+  }
+  testingConnection.value = true;
+  testConnectionResult.value = null;
+  try {
+    const res = await testLlmProvider({
+      provider: currentLlm.provider,
+      apiKey: currentLlm.apiKey,
+      baseUrl: currentLlm.baseUrl,
+      selectedModel: currentLlm.selectedModel
+    });
+    testConnectionResult.value = res;
+    if (res.success) {
+      ElMessage.success(res.message || 'API connection verified successfully!');
+    } else {
+      ElMessage.error(res.error || 'API connection failed');
+    }
+  } catch (err) {
+    testConnectionResult.value = { success: false, error: err.message };
+    ElMessage.error(err.message || 'Connection test failed');
+  } finally {
+    testingConnection.value = false;
+  }
+}
+
+async function handleToggleProviderActive(prov, newStatus) {
+  try {
+    await toggleLlmActive(prov.id, newStatus);
+    ElMessage.success(`${prov.name} is now ${newStatus ? 'active in failover pool' : 'disabled'}`);
+    await fetchData();
+  } catch (err) {
+    ElMessage.error(err.message || 'Failed to toggle provider');
+  }
+}
+
+async function moveProvider(providerId, direction) {
+  const chain = [...activeLlmChain.value];
+  const idx = chain.findIndex(p => p.id === providerId);
+  if (idx < 0) return;
+  const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+  if (targetIdx < 0 || targetIdx >= chain.length) return;
+
+  const temp = chain[idx];
+  chain[idx] = chain[targetIdx];
+  chain[targetIdx] = temp;
+
+  try {
+    await reorderLlmChain(chain.map(p => p.id));
+    ElMessage.success('Failover priority order updated');
+    await fetchData();
+  } catch (err) {
+    ElMessage.error(err.message || 'Failed to update priority order');
   }
 }
 
@@ -1264,7 +1454,8 @@ async function handleSaveLlmConfig() {
       apiKey: currentLlm.apiKey,
       baseUrl: currentLlm.baseUrl,
       selectedModel: currentLlm.selectedModel,
-      isActive: currentLlm.isActiveBool ? 1 : 0
+      isActive: currentLlm.isActiveBool ? 1 : 0,
+      priority: Number(currentLlm.priority) || 10
     });
     ElMessage.success(`${currentProviderMeta.value?.name} configuration saved successfully!`);
     await fetchData();
@@ -1957,6 +2148,186 @@ onMounted(async () => {
 }
 
 /* LLM Provider Styles */
+/* Failover Pool Visualizer */
+.failover-pool-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+
+.failover-pool-header {
+  margin-bottom: 16px;
+}
+
+.failover-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.failover-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.failover-subtitle {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.45;
+  display: block;
+}
+
+.failover-pipeline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.pipeline-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pipeline-node-content {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 12px;
+  min-width: 140px;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.pipeline-node-content:hover {
+  border-color: #94a3b8;
+  background: #e2e8f0;
+}
+
+.pipeline-node-content.safety-net {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+
+.pipeline-rank-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #2563eb;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.pipeline-rank-badge.safety {
+  color: #059669;
+}
+
+.pipeline-node-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.pipeline-node-model {
+  font-size: 11.5px;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 130px;
+}
+
+.pipeline-status-text {
+  font-size: 11px;
+  color: #10b981;
+  margin-top: 2px;
+  font-weight: 500;
+}
+
+.pipeline-node-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.node-arrow-btn {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+  cursor: pointer;
+  color: #475569;
+  transition: all 0.15s ease;
+}
+
+.node-arrow-btn:hover:not(:disabled) {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+}
+
+.node-arrow-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.pipeline-connector {
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+}
+
+.provider-card-toggle {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed #e2e8f0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.test-conn-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  margin-top: 14px;
+  font-size: 13px;
+}
+
+.test-conn-banner.is-success {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.test-conn-banner.is-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.test-conn-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.test-conn-msg {
+  font-size: 12.5px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
 .provider-selector-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

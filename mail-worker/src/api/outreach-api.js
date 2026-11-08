@@ -149,7 +149,179 @@ async function fetchProviderModels(provider, apiKey, baseUrl) {
 	throw new BizError(`Unsupported provider: ${provider}`);
 }
 
-// Autonomous Email Drafting Engine (Auto-Pilot)
+export function getProviderDisplayName(provider) {
+	const map = {
+		anthropic: 'Anthropic Claude',
+		openai: 'OpenAI',
+		google: 'Google Gemini',
+		nvidia_nim: 'NVIDIA NIM',
+		openrouter: 'OpenRouter',
+		custom: 'Custom LLM',
+		cloudflare_ai: 'Cloudflare Workers AI'
+	};
+	return map[provider] || provider;
+}
+
+export function extractSubjectAndBody(text) {
+	if (!text || typeof text !== 'string') return null;
+	const clean = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+	try {
+		const parsed = JSON.parse(clean);
+		if (parsed && parsed.subject && parsed.body) return parsed;
+	} catch {}
+
+	const match = clean.match(/\{[\s\S]*\}/);
+	if (match) {
+		try {
+			const parsed = JSON.parse(match[0]);
+			if (parsed && parsed.subject && parsed.body) return parsed;
+		} catch {}
+	}
+	return null;
+}
+
+export async function executeProviderChat(provider, apiKey, baseUrl, model, systemPrompt, userPrompt, timeoutMs = 12000) {
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+	try {
+		let res;
+		let resultText = '';
+
+		if (provider === 'openai') {
+			const modelName = model || 'gpt-4o-mini';
+			res = await fetch('https://api.openai.com/v1/chat/completions', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+				signal: controller.signal,
+				body: JSON.stringify({
+					model: modelName,
+					messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+					temperature: 0.7,
+					response_format: { type: 'json_object' }
+				})
+			});
+			if (!res.ok) {
+				const errText = await res.text();
+				throw new Error(`OpenAI HTTP ${res.status}: ${errText.slice(0, 150)}`);
+			}
+			const data = await res.json();
+			resultText = data.choices?.[0]?.message?.content || '';
+
+		} else if (provider === 'anthropic') {
+			const modelName = model || 'claude-3-5-sonnet-20241022';
+			res = await fetch('https://api.anthropic.com/v1/messages', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'x-api-key': apiKey,
+					'anthropic-version': '2023-06-01'
+				},
+				signal: controller.signal,
+				body: JSON.stringify({
+					model: modelName,
+					max_tokens: 450,
+					system: systemPrompt,
+					messages: [{ role: 'user', content: userPrompt + '\n\nOutput ONLY raw JSON with keys "subject" and "body".' }]
+				})
+			});
+			if (!res.ok) {
+				const errText = await res.text();
+				throw new Error(`Anthropic HTTP ${res.status}: ${errText.slice(0, 150)}`);
+			}
+			const data = await res.json();
+			resultText = data.content?.[0]?.text || '';
+
+		} else if (provider === 'openrouter') {
+			const modelName = model || 'anthropic/claude-3.5-sonnet';
+			res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'Authorization': `Bearer ${apiKey}`,
+					'HTTP-Referer': 'https://cloud-mail.sohad-flowtics.workers.dev',
+					'X-Title': 'Cloud Mail Outreach'
+				},
+				signal: controller.signal,
+				body: JSON.stringify({
+					model: modelName,
+					messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+					temperature: 0.7
+				})
+			});
+			if (!res.ok) {
+				const errText = await res.text();
+				throw new Error(`OpenRouter HTTP ${res.status}: ${errText.slice(0, 150)}`);
+			}
+			const data = await res.json();
+			resultText = data.choices?.[0]?.message?.content || '';
+
+		} else if (provider === 'nvidia_nim') {
+			const modelName = model || 'meta/llama-3.1-70b-instruct';
+			res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+				signal: controller.signal,
+				body: JSON.stringify({
+					model: modelName,
+					messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+					temperature: 0.7
+				})
+			});
+			if (!res.ok) {
+				const errText = await res.text();
+				throw new Error(`NVIDIA NIM HTTP ${res.status}: ${errText.slice(0, 150)}`);
+			}
+			const data = await res.json();
+			resultText = data.choices?.[0]?.message?.content || '';
+
+		} else if (provider === 'google') {
+			const modelName = model || 'gemini-1.5-flash';
+			res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				signal: controller.signal,
+				body: JSON.stringify({
+					contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}\n\nOutput only raw JSON.` }] }]
+				})
+			});
+			if (!res.ok) {
+				const errText = await res.text();
+				throw new Error(`Google Gemini HTTP ${res.status}: ${errText.slice(0, 150)}`);
+			}
+			const data = await res.json();
+			resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+		} else if (provider === 'custom') {
+			const modelName = model || 'custom';
+			const cleanBase = (baseUrl || '').replace(/\/+$/, '');
+			res = await fetch(`${cleanBase}/chat/completions`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}) },
+				signal: controller.signal,
+				body: JSON.stringify({
+					model: modelName,
+					messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+					temperature: 0.7
+				})
+			});
+			if (!res.ok) {
+				const errText = await res.text();
+				throw new Error(`Custom LLM HTTP ${res.status}: ${errText.slice(0, 150)}`);
+			}
+			const data = await res.json();
+			resultText = data.choices?.[0]?.message?.content || '';
+		} else {
+			throw new Error(`Unsupported provider: ${provider}`);
+		}
+
+		return resultText;
+	} finally {
+		clearTimeout(timeout);
+	}
+}
+
+// Autonomous Email Drafting Engine with Multi-Provider Automatic Failover
 export async function generateAutonomousEmail(c, lead, campaignSettings = {}, campaignType = 'service_outreach') {
 	const targetName = lead.target_name || lead.targetEmail?.split('@')[0] || lead.target_email?.split('@')[0] || 'there';
 	const company = lead.company || (lead.target_email || lead.targetEmail || '').split('@')[1] || 'your team';
@@ -183,136 +355,75 @@ Booking/Review Link: ${booking}
 Draft a high-conversion, professional cold email proposing a brief 10-minute discovery call to see if offloading AI workflow pipelines makes sense. Output JSON only.`;
 	}
 
-	let resultText = '';
-	let providerName = 'Cloudflare AI';
-	let modelName = '@cf/meta/llama-3.1-8b-instruct-fast';
+	let parsed = null;
+	let activeProvider = 'Cloudflare AI';
+	let activeModel = '@cf/meta/llama-3.1-8b-instruct-fast';
+	const failoverChain = [];
 
+	// Fetch all enabled providers from DB ordered by priority (1 = highest priority)
+	let activeLlms = [];
 	try {
-		const activeLlm = await c.env.db.prepare(`SELECT * FROM llm_config WHERE is_active = 1 LIMIT 1`).first();
-
-		if (activeLlm && activeLlm.api_key) {
-			const provider = activeLlm.provider;
-			const apiKey = (activeLlm.api_key || '').trim();
-			const model = activeLlm.selected_model || '';
-
-			if (provider === 'openai') {
-				providerName = 'OpenAI';
-				modelName = model || 'gpt-4o-mini';
-				const res = await fetch('https://api.openai.com/v1/chat/completions', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-					body: JSON.stringify({
-						model: modelName,
-						messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-						temperature: 0.7,
-						response_format: { type: 'json_object' }
-					})
-				});
-				if (res.ok) {
-					const data = await res.json();
-					resultText = data.choices?.[0]?.message?.content || '';
-				}
-			} else if (provider === 'anthropic') {
-				providerName = 'Anthropic';
-				modelName = model || 'claude-3-5-sonnet-20241022';
-				const res = await fetch('https://api.anthropic.com/v1/messages', {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'x-api-key': apiKey,
-						'anthropic-version': '2023-06-01'
-					},
-					body: JSON.stringify({
-						model: modelName,
-						max_tokens: 450,
-						system: systemPrompt,
-						messages: [{ role: 'user', content: userPrompt + '\n\nOutput only raw JSON {"subject": "...", "body": "..."}.' }]
-					})
-				});
-				if (res.ok) {
-					const data = await res.json();
-					resultText = data.content?.[0]?.text || '';
-				}
-			} else if (provider === 'openrouter') {
-				providerName = 'OpenRouter';
-				modelName = model || 'anthropic/claude-3.5-sonnet';
-				const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'Authorization': `Bearer ${apiKey}`,
-						'HTTP-Referer': 'https://cloud-mail.sohad-flowtics.workers.dev',
-						'X-Title': 'Cloud Mail Outreach'
-					},
-					body: JSON.stringify({
-						model: modelName,
-						messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-						temperature: 0.7
-					})
-				});
-				if (res.ok) {
-					const data = await res.json();
-					resultText = data.choices?.[0]?.message?.content || '';
-				}
-			} else if (provider === 'nvidia_nim') {
-				providerName = 'NVIDIA NIM';
-				modelName = model || 'meta/llama-3.1-70b-instruct';
-				const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-					body: JSON.stringify({
-						model: modelName,
-						messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-						temperature: 0.7
-					})
-				});
-				if (res.ok) {
-					const data = await res.json();
-					resultText = data.choices?.[0]?.message?.content || '';
-				}
-			} else if (provider === 'google') {
-				providerName = 'Google Gemini';
-				modelName = model || 'gemini-1.5-flash';
-				const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}\n\nOutput only raw JSON.` }] }]
-					})
-				});
-				if (res.ok) {
-					const data = await res.json();
-					resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-				}
-			} else if (provider === 'custom') {
-				providerName = 'Custom LLM';
-				modelName = model || 'custom';
-				const baseUrl = (activeLlm.base_url || '').replace(/\/+$/, '');
-				const res = await fetch(`${baseUrl}/chat/completions`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json', ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}) },
-					body: JSON.stringify({
-						model: modelName,
-						messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-						temperature: 0.7
-					})
-				});
-				if (res.ok) {
-					const data = await res.json();
-					resultText = data.choices?.[0]?.message?.content || '';
-				}
-			}
-		}
-	} catch (e) {
-		console.error('Active LLM provider execution failed, falling back to Cloudflare AI:', e.message);
+		const rows = await c.env.db.prepare(`
+			SELECT * FROM llm_config 
+			WHERE is_active = 1 
+			ORDER BY priority ASC, config_id ASC
+		`).all();
+		activeLlms = rows?.results || [];
+	} catch (dbErr) {
+		console.error('[Failover Engine] Could not load llm_config:', dbErr.message);
 	}
 
-	// Fallback to Cloudflare Workers AI if no external result
-	if (!resultText && c.env.ai) {
+	// Sequential Failover Execution Loop
+	for (const llm of activeLlms) {
+		const pName = getProviderDisplayName(llm.provider);
+		const mName = llm.selected_model || 'default';
+		const key = (llm.api_key || '').trim();
+
+		// Skip if non-custom provider has no API key
+		if (!key && llm.provider !== 'custom') {
+			continue;
+		}
+
 		try {
-			providerName = 'Cloudflare AI';
-			modelName = '@cf/meta/llama-3.1-8b-instruct-fast';
-			const cfResult = await c.env.ai.run(modelName, {
+			console.log(`[Failover Engine] Attempting generation with ${pName} (${mName})...`);
+			const startTime = Date.now();
+			const text = await executeProviderChat(
+				llm.provider,
+				key,
+				llm.base_url,
+				llm.selected_model,
+				systemPrompt,
+				userPrompt,
+				12000
+			);
+			const duration = Date.now() - startTime;
+			const extracted = extractSubjectAndBody(text);
+
+			if (extracted) {
+				parsed = extracted;
+				activeProvider = pName;
+				activeModel = mName;
+				console.log(`[Failover Engine] Succeeded with ${pName} (${mName}) in ${duration}ms`);
+				break; // Success! Terminate failover loop
+			} else {
+				throw new Error('Provider response could not be parsed into valid subject & body JSON');
+			}
+		} catch (err) {
+			console.warn(`[Failover Engine] Provider ${pName} failed: ${err.message}. Switching to next provider in failover chain...`);
+			failoverChain.push({
+				provider: pName,
+				model: mName,
+				error: err.message || 'Request failed'
+			});
+		}
+	}
+
+	// Fallback to Cloudflare Workers AI if all user providers failed or none active
+	if (!parsed && c.env.ai) {
+		try {
+			console.log('[Failover Engine] Triggering Cloudflare Workers AI fallback...');
+			const cfStartTime = Date.now();
+			const cfResult = await c.env.ai.run('@cf/meta/llama-3.1-8b-instruct-fast', {
 				messages: [
 					{ role: 'system', content: systemPrompt },
 					{ role: 'user', content: userPrompt + '\n\nOutput only valid JSON with "subject" and "body" keys.' }
@@ -320,26 +431,25 @@ Draft a high-conversion, professional cold email proposing a brief 10-minute dis
 				temperature: 0.6,
 				max_tokens: 350
 			});
-			resultText = typeof cfResult === 'string' ? cfResult : cfResult?.response || '';
-		} catch (aiErr) {
-			console.error('Cloudflare AI fallback error:', aiErr.message);
-		}
-	}
-
-	// Parse JSON output
-	let parsed = null;
-	if (resultText) {
-		const cleanJson = resultText.replace(/```json/gi, '').replace(/```/g, '').trim();
-		try {
-			parsed = JSON.parse(cleanJson);
-		} catch {
-			const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
-			if (jsonMatch) {
-				try { parsed = JSON.parse(jsonMatch[0]); } catch {}
+			const cfDuration = Date.now() - cfStartTime;
+			const cfText = typeof cfResult === 'string' ? cfResult : cfResult?.response || '';
+			parsed = extractSubjectAndBody(cfText);
+			if (parsed) {
+				activeProvider = 'Cloudflare Workers AI';
+				activeModel = '@cf/meta/llama-3.1-8b-instruct-fast';
+				console.log(`[Failover Engine] Succeeded with Cloudflare Workers AI in ${cfDuration}ms`);
 			}
+		} catch (aiErr) {
+			console.error('[Failover Engine] Cloudflare AI fallback error:', aiErr.message);
+			failoverChain.push({
+				provider: 'Cloudflare Workers AI',
+				model: '@cf/meta/llama-3.1-8b-instruct-fast',
+				error: aiErr.message
+			});
 		}
 	}
 
+	// Contextual safe fallback template if everything failed
 	if (!parsed || !parsed.subject || !parsed.body) {
 		if (campaignType === 'job_hunting') {
 			parsed = {
@@ -357,8 +467,9 @@ Draft a high-conversion, professional cold email proposing a brief 10-minute dis
 	return {
 		subject: parsed.subject,
 		body: parsed.body,
-		provider: providerName,
-		model: modelName
+		provider: activeProvider,
+		model: activeModel,
+		failoverChain
 	};
 }
 
@@ -386,7 +497,7 @@ app.get('/outreach/dashboard', async (c) => {
 			ORDER BY l.reply_time DESC LIMIT 10
 		`).all(),
 		db.prepare(`SELECT tg_bot_token, tg_chat_id, tg_bot_status, custom_domain FROM setting LIMIT 1`).first(),
-		db.prepare(`SELECT * FROM llm_config ORDER BY config_id ASC`).all()
+		db.prepare(`SELECT * FROM llm_config ORDER BY priority ASC, config_id ASC`).all()
 	]);
 
 	const domains = c.env.domain || [];
@@ -761,37 +872,115 @@ app.post('/outreach/llm/fetch-models', async (c) => {
 	});
 });
 
-// 12. LLM: Save Provider Config (model selection, api key, active toggle)
+// 12. LLM: Save Provider Config (model selection, api key, active toggle, failover priority)
 app.post('/outreach/llm/save-config', async (c) => {
-	const { provider, apiKey, baseUrl, selectedModel, isActive } = await c.req.json();
+	const { provider, apiKey, baseUrl, selectedModel, isActive, priority } = await c.req.json();
 
 	if (!provider) {
 		throw new BizError('Provider is required');
 	}
 
-	if (isActive) {
-		// Set all other providers inactive
-		await c.env.db.prepare(`UPDATE llm_config SET is_active = 0`).run();
-	}
-
 	await c.env.db.prepare(`
-		INSERT INTO llm_config (provider, api_key, base_url, selected_model, is_active, updated_time)
-		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		INSERT INTO llm_config (provider, api_key, base_url, selected_model, is_active, priority, updated_time)
+		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(provider) DO UPDATE SET
 			api_key = COALESCE(NULLIF(excluded.api_key, ''), llm_config.api_key),
 			base_url = excluded.base_url,
 			selected_model = excluded.selected_model,
 			is_active = excluded.is_active,
+			priority = COALESCE(excluded.priority, llm_config.priority, 10),
 			updated_time = CURRENT_TIMESTAMP
 	`).bind(
 		provider,
 		apiKey || '',
 		baseUrl || '',
 		selectedModel || '',
-		isActive ? 1 : 0
+		isActive ? 1 : 0,
+		typeof priority === 'number' ? priority : 10
 	).run();
 
 	return c.json({ code: 200, message: `${provider} configuration saved successfully` });
+});
+
+// 12b. LLM: Toggle Active Status in Failover Pool
+app.post('/outreach/llm/toggle-active', async (c) => {
+	const { provider, isActive } = await c.req.json();
+	if (!provider) throw new BizError('Provider is required');
+
+	await c.env.db.prepare(`
+		UPDATE llm_config 
+		SET is_active = ?, updated_time = CURRENT_TIMESTAMP 
+		WHERE provider = ?
+	`).bind(isActive ? 1 : 0, provider).run();
+
+	return c.json({ code: 200, message: `${provider} is now ${isActive ? 'active in failover pool' : 'disabled'}` });
+});
+
+// 12c. LLM: Reorder Failover Chain Priorities
+app.post('/outreach/llm/reorder', async (c) => {
+	const { providers } = await c.req.json();
+	if (Array.isArray(providers)) {
+		for (let i = 0; i < providers.length; i++) {
+			await c.env.db.prepare(`
+				UPDATE llm_config 
+				SET priority = ?, updated_time = CURRENT_TIMESTAMP 
+				WHERE provider = ?
+			`).bind(i + 1, providers[i]).run();
+		}
+	}
+	return c.json({ code: 200, message: 'Failover priority order updated' });
+});
+
+// 12d. LLM: Live Connection & Latency Test for Provider
+app.post('/outreach/llm/test-provider', async (c) => {
+	const { provider, apiKey, baseUrl, selectedModel } = await c.req.json();
+	if (!provider) throw new BizError('Provider is required');
+
+	let key = (apiKey || '').trim();
+	let base = (baseUrl || '').trim();
+	let model = (selectedModel || '').trim();
+
+	if (!key && provider !== 'custom') {
+		const existing = await c.env.db.prepare(`SELECT * FROM llm_config WHERE provider = ?`).bind(provider).first();
+		if (existing && existing.api_key) {
+			key = existing.api_key.trim();
+			base = base || existing.base_url;
+			model = model || existing.selected_model;
+		}
+	}
+
+	if (!key && provider !== 'custom') {
+		return c.json({ code: 400, success: false, error: 'No API key configured for this provider yet.' });
+	}
+
+	const startTime = Date.now();
+	try {
+		const result = await executeProviderChat(
+			provider,
+			key,
+			base,
+			model,
+			'You are a status verification bot. Answer with valid JSON: {"status": "ok", "message": "Connection verified successfully"}',
+			'Verify connectivity and response time in valid JSON.',
+			10000
+		);
+		const latency = Date.now() - startTime;
+		return c.json({
+			code: 200,
+			success: true,
+			latencyMs: latency,
+			message: `Connected successfully (${latency}ms latency)!`,
+			preview: (result || '').slice(0, 150)
+		});
+	} catch (err) {
+		const latency = Date.now() - startTime;
+		return c.json({
+			code: 200,
+			success: false,
+			latencyMs: latency,
+			error: err.message || 'Connection test failed'
+		});
+	}
 });
 
 // 13. Update Telegram settings
