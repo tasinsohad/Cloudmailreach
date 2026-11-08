@@ -149,6 +149,219 @@ async function fetchProviderModels(provider, apiKey, baseUrl) {
 	throw new BizError(`Unsupported provider: ${provider}`);
 }
 
+// Autonomous Email Drafting Engine (Auto-Pilot)
+export async function generateAutonomousEmail(c, lead, campaignSettings = {}, campaignType = 'service_outreach') {
+	const targetName = lead.target_name || lead.targetEmail?.split('@')[0] || lead.target_email?.split('@')[0] || 'there';
+	const company = lead.company || (lead.target_email || lead.targetEmail || '').split('@')[1] || 'your team';
+
+	let systemPrompt = '';
+	let userPrompt = '';
+
+	if (campaignType === 'job_hunting') {
+		const roles = campaignSettings.targetRoles || 'Senior Full-Stack Engineer / AI Solutions Architect';
+		const portfolio = campaignSettings.portfolioUrl || 'github.com/tasinsohad | linkedin.com/in/tasinsohad';
+		const resume = campaignSettings.resumeUrl || 'https://drive.google.com/file/d/1jVtmUEEYGtgmsMp0jGzZQX0QslTVGX4a/view?usp=sharing';
+		const pitch = campaignSettings.pitchFocus || 'I build autonomous AI agents and production web applications with vibe coding and AI toolchains, shipping systems in days.';
+
+		systemPrompt = `You are an elite, natural human outreach AI representing Tasin Sohad for engineering & AI roles. Write a compelling, concise (under 80 words), high-converting cold email to a tech recruiter or hiring manager. Never sound like a generic template. Format response ONLY as valid JSON: {"subject": "...", "body": "..."}`;
+		userPrompt = `Recipient: ${targetName} at ${company}.
+Target Roles: ${roles}
+Portfolio: ${portfolio}
+Resume Link: ${resume}
+Value Proposition: ${pitch}
+Draft a warm, sharp message asking if they are exploring senior engineers/builders with strong AI delivery speed. Output JSON only.`;
+	} else {
+		// Harvey B2B Client Acquisition
+		const icp = campaignSettings.icpIndustries || 'B2B SaaS, Logistics & Tech Startups';
+		const offering = campaignSettings.serviceOffering || 'Takes AI implementation, custom LLM workflows, automated data pipelines, and internal tools off engineering backlogs.';
+		const booking = campaignSettings.bookingUrl || 'https://drive.google.com/file/d/1jVtmUEEYGtgmsMp0jGzZQX0QslTVGX4a/view?usp=sharing';
+
+		systemPrompt = `You are Harvey, an autonomous B2B client acquisition AI for Tasin Sohad. Write a tailored, executive-level cold outreach email (under 75 words) that solves an engineering backlog problem. Avoid spammy sales fluff. Format response ONLY as valid JSON: {"subject": "...", "body": "..."}`;
+		userPrompt = `Prospect: ${targetName} at ${company} (ICP: ${icp}).
+Offering: ${offering}
+Booking/Review Link: ${booking}
+Draft a high-conversion, professional cold email proposing a brief 10-minute discovery call to see if offloading AI workflow pipelines makes sense. Output JSON only.`;
+	}
+
+	let resultText = '';
+	let providerName = 'Cloudflare AI';
+	let modelName = '@cf/meta/llama-3.1-8b-instruct-fast';
+
+	try {
+		const activeLlm = await c.env.db.prepare(`SELECT * FROM llm_config WHERE is_active = 1 LIMIT 1`).first();
+
+		if (activeLlm && activeLlm.api_key) {
+			const provider = activeLlm.provider;
+			const apiKey = (activeLlm.api_key || '').trim();
+			const model = activeLlm.selected_model || '';
+
+			if (provider === 'openai') {
+				providerName = 'OpenAI';
+				modelName = model || 'gpt-4o-mini';
+				const res = await fetch('https://api.openai.com/v1/chat/completions', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+					body: JSON.stringify({
+						model: modelName,
+						messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+						temperature: 0.7,
+						response_format: { type: 'json_object' }
+					})
+				});
+				if (res.ok) {
+					const data = await res.json();
+					resultText = data.choices?.[0]?.message?.content || '';
+				}
+			} else if (provider === 'anthropic') {
+				providerName = 'Anthropic';
+				modelName = model || 'claude-3-5-sonnet-20241022';
+				const res = await fetch('https://api.anthropic.com/v1/messages', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'x-api-key': apiKey,
+						'anthropic-version': '2023-06-01'
+					},
+					body: JSON.stringify({
+						model: modelName,
+						max_tokens: 450,
+						system: systemPrompt,
+						messages: [{ role: 'user', content: userPrompt + '\n\nOutput only raw JSON {"subject": "...", "body": "..."}.' }]
+					})
+				});
+				if (res.ok) {
+					const data = await res.json();
+					resultText = data.content?.[0]?.text || '';
+				}
+			} else if (provider === 'openrouter') {
+				providerName = 'OpenRouter';
+				modelName = model || 'anthropic/claude-3.5-sonnet';
+				const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'Authorization': `Bearer ${apiKey}`,
+						'HTTP-Referer': 'https://cloud-mail.sohad-flowtics.workers.dev',
+						'X-Title': 'Cloud Mail Outreach'
+					},
+					body: JSON.stringify({
+						model: modelName,
+						messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+						temperature: 0.7
+					})
+				});
+				if (res.ok) {
+					const data = await res.json();
+					resultText = data.choices?.[0]?.message?.content || '';
+				}
+			} else if (provider === 'nvidia_nim') {
+				providerName = 'NVIDIA NIM';
+				modelName = model || 'meta/llama-3.1-70b-instruct';
+				const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+					body: JSON.stringify({
+						model: modelName,
+						messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+						temperature: 0.7
+					})
+				});
+				if (res.ok) {
+					const data = await res.json();
+					resultText = data.choices?.[0]?.message?.content || '';
+				}
+			} else if (provider === 'google') {
+				providerName = 'Google Gemini';
+				modelName = model || 'gemini-1.5-flash';
+				const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}\n\nOutput only raw JSON.` }] }]
+					})
+				});
+				if (res.ok) {
+					const data = await res.json();
+					resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+				}
+			} else if (provider === 'custom') {
+				providerName = 'Custom LLM';
+				modelName = model || 'custom';
+				const baseUrl = (activeLlm.base_url || '').replace(/\/+$/, '');
+				const res = await fetch(`${baseUrl}/chat/completions`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json', ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}) },
+					body: JSON.stringify({
+						model: modelName,
+						messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+						temperature: 0.7
+					})
+				});
+				if (res.ok) {
+					const data = await res.json();
+					resultText = data.choices?.[0]?.message?.content || '';
+				}
+			}
+		}
+	} catch (e) {
+		console.error('Active LLM provider execution failed, falling back to Cloudflare AI:', e.message);
+	}
+
+	// Fallback to Cloudflare Workers AI if no external result
+	if (!resultText && c.env.ai) {
+		try {
+			providerName = 'Cloudflare AI';
+			modelName = '@cf/meta/llama-3.1-8b-instruct-fast';
+			const cfResult = await c.env.ai.run(modelName, {
+				messages: [
+					{ role: 'system', content: systemPrompt },
+					{ role: 'user', content: userPrompt + '\n\nOutput only valid JSON with "subject" and "body" keys.' }
+				],
+				temperature: 0.6,
+				max_tokens: 350
+			});
+			resultText = typeof cfResult === 'string' ? cfResult : cfResult?.response || '';
+		} catch (aiErr) {
+			console.error('Cloudflare AI fallback error:', aiErr.message);
+		}
+	}
+
+	// Parse JSON output
+	let parsed = null;
+	if (resultText) {
+		const cleanJson = resultText.replace(/```json/gi, '').replace(/```/g, '').trim();
+		try {
+			parsed = JSON.parse(cleanJson);
+		} catch {
+			const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
+			if (jsonMatch) {
+				try { parsed = JSON.parse(jsonMatch[0]); } catch {}
+			}
+		}
+	}
+
+	if (!parsed || !parsed.subject || !parsed.body) {
+		if (campaignType === 'job_hunting') {
+			parsed = {
+				subject: `Quick intro: Tasin Sohad — Senior Engineering / AI`,
+				body: `Hi ${targetName},\n\nI came across ${company} and wanted to reach out directly. I build autonomous AI agents, LLM pipelines, and scalable web apps.\n\nMy portfolio & resume: https://drive.google.com/file/d/1jVtmUEEYGtgmsMp0jGzZQX0QslTVGX4a/view?usp=sharing\n\nWould love to connect if you are exploring strong technical talent.\n\nBest,\nTasin Sohad`
+			};
+		} else {
+			parsed = {
+				subject: `AI implementations & internal automation for ${company}`,
+				body: `Hi ${targetName},\n\nI build custom LLM workflows, automated pipelines, and agentic internal tools that take engineering backlogs off tech teams.\n\nCould we do a brief 10-minute chat this week to see if we can accelerate any pending AI initiatives for ${company}?\n\nOverview & work: https://drive.google.com/file/d/1jVtmUEEYGtgmsMp0jGzZQX0QslTVGX4a/view?usp=sharing\n\nBest,\nTasin Sohad`
+			};
+		}
+	}
+
+	return {
+		subject: parsed.subject,
+		body: parsed.body,
+		provider: providerName,
+		model: modelName
+	};
+}
+
 // 1. Dashboard summary stats
 app.get('/outreach/dashboard', async (c) => {
 	const db = c.env.db;
@@ -195,9 +408,13 @@ app.get('/outreach/dashboard', async (c) => {
 		};
 	}));
 
+	const autoPilotVal = await c.env.kv.get('outreach:autopilot');
+	const autoPilotEnabled = autoPilotVal === '1';
+
 	return c.json({
 		code: 200,
 		data: {
+			autopilot: autoPilotEnabled,
 			campaigns: campaignsRes.results || [],
 			stats: leadsStatsRes || { total_leads: 0, queued_count: 0, sent_count: 0, replied_count: 0, bounced_count: 0 },
 			accounts: accountsWithStats,
@@ -469,13 +686,27 @@ app.post('/outreach/dispatch-batch', async (c) => {
 		const accountId = senderAccount.accountId;
 
 		try {
+			const isAutoPilot = (await c.env.kv.get('outreach:autopilot')) === '1';
+			let emailSubject = lead.subject;
+			let emailBody = lead.body;
+
+			// If Auto-Pilot is ON or if lead has no custom body, autonomously draft personalized email
+			if (isAutoPilot || !emailBody || emailBody.trim().length === 0) {
+				const campRow = await c.env.db.prepare(`SELECT type, settings FROM campaign WHERE campaign_id = ?`).bind(lead.campaign_id).first();
+				let settingsObj = {};
+				try { settingsObj = JSON.parse(campRow?.settings || '{}'); } catch {}
+				const generated = await generateAutonomousEmail(c, lead, settingsObj, campRow?.type || 'service_outreach');
+				emailSubject = generated.subject;
+				emailBody = generated.body;
+			}
+
 			await emailService.send(c, {
 				accountId: accountId,
 				receiveEmail: [lead.target_email],
 				name: 'Tasin Sohad',
-				subject: lead.subject,
-				text: lead.body || '',
-				content: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: #111; line-height: 1.6;">${(lead.body || '').replace(/\n/g, '<br/>')}</div>`,
+				subject: emailSubject,
+				text: emailBody || '',
+				content: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: #111; line-height: 1.6;">${(emailBody || '').replace(/\n/g, '<br/>')}</div>`,
 				sendType: 'new',
 				attachments: []
 			}, 1);
@@ -484,9 +715,9 @@ app.post('/outreach/dispatch-batch', async (c) => {
 
 			await c.env.db.prepare(`
 				UPDATE outreach_lead 
-				SET status = 'sent', sender_email = ?, sent_time = CURRENT_TIMESTAMP 
+				SET status = 'sent', subject = ?, body = ?, sender_email = ?, sent_time = CURRENT_TIMESTAMP 
 				WHERE lead_id = ?
-			`).bind(senderAccount.email, lead.lead_id).run();
+			`).bind(emailSubject, emailBody, senderAccount.email, lead.lead_id).run();
 
 			sentSuccess++;
 		} catch (err) {
@@ -656,4 +887,33 @@ app.post('/outreach/inbox/batch-limit', async (c) => {
 	}
 
 	return c.json({ code: 200, message: `Successfully updated daily limit to ${limitNum} emails/day` });
+});
+
+// 17. Auto-Pilot: Toggle Master Autonomous Mode
+app.post('/outreach/autopilot/toggle', async (c) => {
+	const { enabled } = await c.req.json();
+	const val = enabled ? '1' : '0';
+	await c.env.kv.put('outreach:autopilot', val);
+	return c.json({ 
+		code: 200, 
+		message: `Outreach Auto-Pilot is now ${enabled ? 'ACTIVATED' : 'PAUSED'}`, 
+		autopilot: Boolean(enabled) 
+	});
+});
+
+// 18. Auto-Pilot: Live Test & Preview Generation
+app.post('/outreach/autopilot/preview', async (c) => {
+	const body = await c.req.json();
+	const targetEmail = body.targetEmail || 'alex@stripe.com';
+	const targetName = body.targetName || 'Alex';
+	const company = body.company || 'Stripe';
+	const campaignType = body.campaignType || 'service_outreach';
+	const settings = body.settings || {};
+
+	const result = await generateAutonomousEmail(c, { target_email: targetEmail, target_name: targetName, company }, settings, campaignType);
+
+	return c.json({
+		code: 200,
+		data: result
+	});
 });

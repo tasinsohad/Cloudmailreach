@@ -8,6 +8,7 @@ import oauthService from './service/oauth-service';
 import analysisService from './service/analysis-service';
 import dayjs from 'dayjs';
 import kvConst from './const/kv-const';
+import { generateAutonomousEmail } from './api/outreach-api';
 
 export default {
 	async fetch(req, env, ctx) {
@@ -104,13 +105,25 @@ export default {
 
 					const accountId = sender.accountId;
 					try {
+						const isAutoPilot = (await env.kv.get('outreach:autopilot')) === '1';
+						let emailSubject = lead.subject;
+						let emailBody = lead.body;
+
+						if (isAutoPilot || !emailBody || emailBody.trim().length === 0) {
+							let settingsObj = {};
+							try { settingsObj = JSON.parse(camp.settings || '{}'); } catch {}
+							const generated = await generateAutonomousEmail({ env }, lead, settingsObj, camp.type);
+							emailSubject = generated.subject;
+							emailBody = generated.body;
+						}
+
 						await emailService.send({ env }, {
 							accountId: accountId,
 							receiveEmail: [lead.target_email],
 							name: 'Tasin Sohad',
-							subject: lead.subject,
-							text: lead.body || '',
-							content: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: #111; line-height: 1.6;">${(lead.body || '').replace(/\n/g, '<br/>')}</div>`,
+							subject: emailSubject,
+							text: emailBody || '',
+							content: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: #111; line-height: 1.6;">${(emailBody || '').replace(/\n/g, '<br/>')}</div>`,
 							sendType: 'new',
 							attachments: []
 						}, 1);
@@ -119,9 +132,9 @@ export default {
 
 						await env.db.prepare(`
 							UPDATE outreach_lead 
-							SET status = 'sent', sender_email = ?, sent_time = CURRENT_TIMESTAMP 
+							SET status = 'sent', subject = ?, body = ?, sender_email = ?, sent_time = CURRENT_TIMESTAMP 
 							WHERE lead_id = ?
-						`).bind(sender.email, lead.lead_id).run();
+						`).bind(emailSubject, emailBody, sender.email, lead.lead_id).run();
 					} catch (e) {
 						console.error(`Scheduled outreach dispatch error for ${lead.target_email}:`, e.message);
 					}

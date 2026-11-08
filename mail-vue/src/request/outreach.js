@@ -63,3 +63,11 @@ export function updateInboxLimit(accountId, dailyLimit) {
 export function batchUpdateInboxLimits(dailyLimit, domain) {
     return http.post('/outreach/inbox/batch-limit', { dailyLimit, domain });
 }
+
+export function toggleAutoPilot(enabled) {
+    return http.post('/outreach/autopilot/toggle', { enabled });
+}
+
+export function previewAutoPilot(payload) {
+    return http.post('/outreach/autopilot/preview', payload);
+}
