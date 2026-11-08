@@ -15,6 +15,11 @@
           <Icon icon="hugeicons:mailbox-01" width="20" height="20" />
           <span class="menu-name" style="margin-left: 16px">{{$t('inbox')}}</span>
         </el-menu-item>
+        <el-menu-item @click="router.push({name: 'outreach'})" index="outreach"
+                      :class="route.meta.name === 'outreach' ? 'choose-item' : ''">
+          <Icon icon="fluent:rocket-20-regular" width="20" height="20" />
+          <span class="menu-name" style="margin-left: 16px">Outreach Hub</span>
+        </el-menu-item>
         <el-menu-item @click="router.push({name: 'send'})" index="send" v-perm="'email:send'"
                       :class="route.meta.name === 'send' ? 'choose-item' : ''">
           <Icon icon="cil:send" width="20" height="20" />

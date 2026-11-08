@@ -412,10 +412,12 @@ const emailService = {
 
 		const domain = emailUtils.getDomain(accountRow.email);
 		const resendToken = resendTokens[domain];
+		const brevoApiKey = c.env.brevo_api_key;
+		const isBrevoDomain = ['nccwtech.com', 'saiftechnology.com'].includes(domain);
 		const useCloudflareEmail = !!c.env.email;
 
 		//如果接收方存在站外邮箱，又没有发信服务
-		if (!useCloudflareEmail && !resendToken && !allInternal) {
+		if (!useCloudflareEmail && !resendToken && !(isBrevoDomain && brevoApiKey) && !allInternal) {
 			throw new BizError(t('noSendProvider'));
 		}
 
@@ -475,6 +477,10 @@ const emailService = {
 		let deliveries;
 		if (allInternal) {
 			deliveries = this.sendInternal(c, context);
+		} else if (resendToken) {
+			deliveries = this.sendResend(c, context);
+		} else if (isBrevoDomain && brevoApiKey) {
+			deliveries = this.sendBrevo(c, { ...context, brevoApiKey });
 		} else if (useCloudflareEmail) {
 			deliveries = this.sendCloudflare(c, context);
 		} else {
@@ -508,6 +514,61 @@ const emailService = {
 			failedRecipients: sendParams.receiveEmail.filter(address => !sentRecipients.includes(address)),
 			error: sendError
 		};
+	},
+
+
+	async *sendBrevo(c, { separate, brevoApiKey, sendParams, saveParams }) {
+		const recipientGroups = separate
+			? sendParams.receiveEmail.map(address => [address])
+			: [sendParams.receiveEmail];
+
+		for (const receiveEmail of recipientGroups) {
+			let result;
+			try {
+				result = await this.sendByBrevo(brevoApiKey, { ...sendParams, receiveEmail });
+			} catch (error) {
+				if (!separate) throw error;
+				yield { error: { message: error.message } };
+				return;
+			}
+			if (result.error) {
+				yield { error: result.error };
+				return;
+			}
+			const emailResult = await this.saveSentEmail(c, {
+				...saveParams, receiveEmail, providerId: result.data.id
+			});
+			yield { emails: [emailResult] };
+		}
+	},
+
+	async sendByBrevo(brevoApiKey, params) {
+		const sendForm = {
+			sender: { name: params.name, email: params.accountEmail },
+			to: params.receiveEmail.map(email => ({ email })),
+			subject: params.subject,
+			htmlContent: params.html || params.text,
+			textContent: params.text || ''
+		};
+		if (params.sendType === 'reply' && params.messageId) {
+			sendForm.headers = {
+				'In-Reply-To': params.messageId,
+				'References': params.messageId
+			};
+		}
+		const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+			method: 'POST',
+			headers: {
+				'api-key': brevoApiKey,
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify(sendForm)
+		});
+		const data = await res.json();
+		if (!res.ok) {
+			return { error: { message: data.message || 'Brevo send error' } };
+		}
+		return { data: { id: data.messageId } };
 	},
 
 	// 站内发送：普通发送共用一条发件记录，分开发送则每人一条，再写入站内收件箱。
@@ -594,17 +655,25 @@ const emailService = {
 			...item, contentId: `<${item.contentId.replace(/^<|>$/g, '')}>`
 		}));
 		const emailData = {
-			sendEmail, name, subject, text, accountId, userId,
-			content: this.imgReplace(html, imageDataList, r2Domain),
+			sendEmail: sendEmail || '',
+			name: name || '',
+			subject: subject || '',
+			text: text || '',
+			accountId,
+			userId,
+			content: this.imgReplace(html || '', imageDataList, r2Domain || '') || '',
 			status: useCloudflareEmail ? emailConst.status.DELIVERED : emailConst.status.SENT,
 			type: emailConst.type.SEND,
-			resendEmailId: providerId,
+			resendEmailId: providerId || '',
 			recipient: JSON.stringify(receiveEmail.map(address => ({ address, name: '' })))
 		};
-		if (sendType === 'reply') {
+		if (sendType === 'reply' && messageId) {
 			emailData.inReplyTo = messageId;
 			emailData.relation = messageId;
 		}
+		Object.keys(emailData).forEach(k => {
+			if (emailData[k] === undefined) delete emailData[k];
+		});
 		if (roleRow.sendCount && roleRow.sendType !== 'internal') {
 			await userService.incrUserSendCount(c, receiveEmail.length, userId);
 		}

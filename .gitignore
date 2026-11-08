@@ -26,3 +26,8 @@ mail-vue/dist
 .wrangler
 .venv
 git-tools.js
+.env
+.env.*
+!.env.release
+!.env.dev
+!.env.remote

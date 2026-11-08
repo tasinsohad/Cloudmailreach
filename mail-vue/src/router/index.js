@@ -22,6 +22,16 @@ const routes = [
                 }
             },
             {
+                path: '/outreach',
+                name: 'outreach',
+                component: () => import('@/views/outreach/index.vue'),
+                meta: {
+                    title: 'outreach',
+                    name: 'outreach',
+                    menu: true
+                }
+            },
+            {
                 path: '/:mailbox(inbox|starred|sent|all-mail)/messages',
                 name: 'content',
                 component: () => import('@/views/content/index.vue'),
