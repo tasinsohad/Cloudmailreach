@@ -329,13 +329,41 @@ export async function generateAutonomousEmail(c, lead, campaignSettings = {}, ca
 	let systemPrompt = '';
 	let userPrompt = '';
 
+	// Custom System Prompt Resolver (Campaign-level or Global KV)
+	let customSystemPrompt = campaignSettings.systemPrompt;
+	if (!customSystemPrompt && c.env?.kv) {
+		if (campaignType === 'job_hunting') {
+			customSystemPrompt = await c.env.kv.get('outreach:system_prompt:job_hunting');
+		} else {
+			customSystemPrompt = await c.env.kv.get('outreach:system_prompt:service_outreach');
+		}
+		if (!customSystemPrompt) {
+			customSystemPrompt = await c.env.kv.get('outreach:system_prompt:global');
+		}
+	}
+
 	if (campaignType === 'job_hunting') {
 		const roles = campaignSettings.targetRoles || 'Senior Full-Stack Engineer / AI Solutions Architect';
 		const portfolio = campaignSettings.portfolioUrl || 'github.com/tasinsohad | linkedin.com/in/tasinsohad';
 		const resume = campaignSettings.resumeUrl || 'https://drive.google.com/file/d/1jVtmUEEYGtgmsMp0jGzZQX0QslTVGX4a/view?usp=sharing';
 		const pitch = campaignSettings.pitchFocus || 'I build autonomous AI agents and production web applications with vibe coding and AI toolchains, shipping systems in days.';
 
-		systemPrompt = `You are an elite, natural human outreach AI representing Tasin Sohad for engineering & AI roles. Write a compelling, concise (under 80 words), high-converting cold email to a tech recruiter or hiring manager. Never sound like a generic template. Format response ONLY as valid JSON: {"subject": "...", "body": "..."}`;
+		if (customSystemPrompt && customSystemPrompt.trim()) {
+			systemPrompt = customSystemPrompt
+				.replaceAll('{{targetName}}', targetName)
+				.replaceAll('{{company}}', company)
+				.replaceAll('{{roles}}', roles)
+				.replaceAll('{{portfolio}}', portfolio)
+				.replaceAll('{{portfolioUrl}}', portfolio)
+				.replaceAll('{{resume}}', resume)
+				.replaceAll('{{resumeUrl}}', resume)
+				.replaceAll('{{pitch}}', pitch);
+			if (!systemPrompt.includes('"subject"') || !systemPrompt.includes('"body"')) {
+				systemPrompt += '\n\nIMPORTANT: Output your entire response ONLY as a valid JSON object: {"subject": "...", "body": "..."}';
+			}
+		} else {
+			systemPrompt = `You are an elite, natural human outreach AI representing Tasin Sohad for engineering & AI roles. Write a compelling, concise (under 80 words), high-converting cold email to a tech recruiter or hiring manager. Never sound like a generic template. Format response ONLY as valid JSON: {"subject": "...", "body": "..."}`;
+		}
 		userPrompt = `Recipient: ${targetName} at ${company}.
 Target Roles: ${roles}
 Portfolio: ${portfolio}
@@ -348,7 +376,20 @@ Draft a warm, sharp message asking if they are exploring senior engineers/builde
 		const offering = campaignSettings.serviceOffering || 'Takes AI implementation, custom LLM workflows, automated data pipelines, and internal tools off engineering backlogs.';
 		const booking = campaignSettings.bookingUrl || 'https://drive.google.com/file/d/1jVtmUEEYGtgmsMp0jGzZQX0QslTVGX4a/view?usp=sharing';
 
-		systemPrompt = `You are Harvey, an autonomous B2B client acquisition AI for Tasin Sohad. Write a tailored, executive-level cold outreach email (under 75 words) that solves an engineering backlog problem. Avoid spammy sales fluff. Format response ONLY as valid JSON: {"subject": "...", "body": "..."}`;
+		if (customSystemPrompt && customSystemPrompt.trim()) {
+			systemPrompt = customSystemPrompt
+				.replaceAll('{{targetName}}', targetName)
+				.replaceAll('{{company}}', company)
+				.replaceAll('{{icp}}', icp)
+				.replaceAll('{{offering}}', offering)
+				.replaceAll('{{booking}}', booking)
+				.replaceAll('{{bookingUrl}}', booking);
+			if (!systemPrompt.includes('"subject"') || !systemPrompt.includes('"body"')) {
+				systemPrompt += '\n\nIMPORTANT: Output your entire response ONLY as a valid JSON object: {"subject": "...", "body": "..."}';
+			}
+		} else {
+			systemPrompt = `You are Harvey, an autonomous B2B client acquisition AI for Tasin Sohad. Write a tailored, executive-level cold outreach email (under 75 words) that solves an engineering backlog problem. Avoid spammy sales fluff. Format response ONLY as valid JSON: {"subject": "...", "body": "..."}`;
+		}
 		userPrompt = `Prospect: ${targetName} at ${company} (ICP: ${icp}).
 Offering: ${offering}
 Booking/Review Link: ${booking}
@@ -522,6 +563,18 @@ app.get('/outreach/dashboard', async (c) => {
 	const autoPilotVal = await c.env.kv.get('outreach:autopilot');
 	const autoPilotEnabled = autoPilotVal === '1';
 
+	const [jobPromptVal, clientPromptVal, globalPromptVal] = await Promise.all([
+		c.env.kv.get('outreach:system_prompt:job_hunting'),
+		c.env.kv.get('outreach:system_prompt:service_outreach'),
+		c.env.kv.get('outreach:system_prompt:global')
+	]);
+
+	const systemPrompts = {
+		job_hunting: jobPromptVal || `You are an elite, natural human outreach AI representing Tasin Sohad for engineering & AI roles. Write a compelling, concise (under 80 words), high-converting cold email to a tech recruiter or hiring manager. Never sound like a generic template. Format response ONLY as valid JSON: {"subject": "...", "body": "..."}`,
+		service_outreach: clientPromptVal || `You are Harvey, an autonomous B2B client acquisition AI for Tasin Sohad. Write a tailored, executive-level cold outreach email (under 75 words) that solves an engineering backlog problem. Avoid spammy sales fluff. Format response ONLY as valid JSON: {"subject": "...", "body": "..."}`,
+		global: globalPromptVal || ''
+	};
+
 	return c.json({
 		code: 200,
 		data: {
@@ -541,6 +594,7 @@ app.get('/outreach/dashboard', async (c) => {
 				tgBotStatus: settingRow?.tg_bot_status ?? 1,
 				configured: Boolean(settingRow?.tg_bot_token && settingRow?.tg_chat_id)
 			},
+			systemPrompts,
 			llmConfigs: llmConfigsRes.results || []
 		}
 	});
@@ -1014,6 +1068,48 @@ app.post('/outreach/llm/test-provider', async (c) => {
 	}
 });
 
+// 12e. Save Custom AI System Prompts
+app.post('/outreach/system-prompts/save', async (c) => {
+	const { job_hunting, service_outreach, global } = await c.req.json();
+	if (job_hunting !== undefined) {
+		await c.env.kv.put('outreach:system_prompt:job_hunting', (job_hunting || '').trim());
+	}
+	if (service_outreach !== undefined) {
+		await c.env.kv.put('outreach:system_prompt:service_outreach', (service_outreach || '').trim());
+	}
+	if (global !== undefined) {
+		await c.env.kv.put('outreach:system_prompt:global', (global || '').trim());
+	}
+	return c.json({
+		code: 200,
+		message: 'AI system prompts saved successfully',
+		data: { job_hunting, service_outreach, global }
+	});
+});
+
+// 12f. Reset System Prompts to High-Converting Defaults
+app.post('/outreach/system-prompts/reset', async (c) => {
+	const { type } = await c.req.json();
+	if (type === 'job_hunting' || type === 'all') {
+		await c.env.kv.delete('outreach:system_prompt:job_hunting');
+	}
+	if (type === 'service_outreach' || type === 'all') {
+		await c.env.kv.delete('outreach:system_prompt:service_outreach');
+	}
+	if (type === 'global' || type === 'all') {
+		await c.env.kv.delete('outreach:system_prompt:global');
+	}
+	return c.json({
+		code: 200,
+		message: 'System prompts reset to default',
+		data: {
+			job_hunting: `You are an elite, natural human outreach AI representing Tasin Sohad for engineering & AI roles. Write a compelling, concise (under 80 words), high-converting cold email to a tech recruiter or hiring manager. Never sound like a generic template. Format response ONLY as valid JSON: {"subject": "...", "body": "..."}`,
+			service_outreach: `You are Harvey, an autonomous B2B client acquisition AI for Tasin Sohad. Write a tailored, executive-level cold outreach email (under 75 words) that solves an engineering backlog problem. Avoid spammy sales fluff. Format response ONLY as valid JSON: {"subject": "...", "body": "..."}`,
+			global: ''
+		}
+	});
+});
+
 // 13. Update Telegram settings
 app.post('/outreach/telegram/update', async (c) => {
 	const { tgBotToken, tgChatId } = await c.req.json();
@@ -1129,6 +1225,9 @@ app.post('/outreach/autopilot/preview', async (c) => {
 	const company = body.company || 'Stripe';
 	const campaignType = body.campaignType || 'service_outreach';
 	const settings = body.settings || {};
+	if (body.systemPrompt) {
+		settings.systemPrompt = body.systemPrompt;
+	}
 
 	const result = await generateAutonomousEmail(c, { target_email: targetEmail, target_name: targetName, company }, settings, campaignType);
 

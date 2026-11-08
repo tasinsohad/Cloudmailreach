@@ -83,3 +83,11 @@ export function toggleAutoPilot(enabled) {
 export function previewAutoPilot(payload) {
     return http.post('/outreach/autopilot/preview', payload);
 }
+
+export function saveSystemPrompts(data) {
+    return http.post('/outreach/system-prompts/save', data);
+}
+
+export function resetSystemPrompts(type = 'all') {
+    return http.post('/outreach/system-prompts/reset', { type });
+}

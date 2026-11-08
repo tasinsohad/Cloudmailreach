@@ -563,6 +563,91 @@
                 </div>
               </div>
 
+              <!-- AI System Prompt & Persona Instructions Customizer -->
+              <div class="system-prompt-card">
+                <div class="prompt-header">
+                  <div class="prompt-title-row">
+                    <div class="prompt-icon-box">
+                      <Icon icon="fluent:document-sparkle-20-regular" width="22" height="22" style="color: #4f46e5;" />
+                    </div>
+                    <div>
+                      <h3 class="prompt-heading">AI System Prompt & Persona Customizer</h3>
+                      <div class="prompt-subheading">
+                        Instruct your AI on persona, tone of voice, brevity rules, forbidden sales cliches, and call-to-action strategy. The system guarantees valid output format.
+                      </div>
+                    </div>
+                  </div>
+                  <div class="prompt-actions">
+                    <el-button size="small" type="warning" plain :loading="resettingPrompt" @click="handleResetSystemPrompts">
+                      <Icon icon="fluent:arrow-reset-20-regular" width="16" height="16" style="margin-right: 4px;" />
+                      Reset to Default
+                    </el-button>
+                    <el-button size="small" type="primary" :loading="savingPrompt" @click="handleSaveSystemPrompts">
+                      <Icon icon="fluent:save-20-regular" width="16" height="16" style="margin-right: 4px;" />
+                      Save System Prompt
+                    </el-button>
+                  </div>
+                </div>
+
+                <!-- Persona Switcher -->
+                <div class="prompt-mode-tabs">
+                  <button 
+                    type="button" 
+                    class="mode-pill" 
+                    :class="{ active: activePromptMode === 'service_outreach' }"
+                    @click="activePromptMode = 'service_outreach'"
+                  >
+                    <Icon icon="fluent:briefcase-20-regular" width="16" height="16" />
+                    <span>🚀 Harvey (Client Hunting) Persona</span>
+                  </button>
+                  <button 
+                    type="button" 
+                    class="mode-pill" 
+                    :class="{ active: activePromptMode === 'job_hunting' }"
+                    @click="activePromptMode = 'job_hunting'"
+                  >
+                    <Icon icon="fluent:hat-graduation-20-regular" width="16" height="16" />
+                    <span>💼 Career-Ops (Job Hunting) Persona</span>
+                  </button>
+                  <button 
+                    type="button" 
+                    class="mode-pill" 
+                    :class="{ active: activePromptMode === 'global' }"
+                    @click="activePromptMode = 'global'"
+                  >
+                    <Icon icon="fluent:globe-20-regular" width="16" height="16" />
+                    <span>🌐 Global Directive (Universal Fallback)</span>
+                  </button>
+                </div>
+
+                <!-- Textarea for activePromptMode -->
+                <div class="prompt-editor-wrapper">
+                  <el-input 
+                    v-model="systemPrompts[activePromptMode]" 
+                    type="textarea" 
+                    :rows="4"
+                    placeholder="Enter custom AI system prompt instructions..."
+                    class="system-prompt-textarea"
+                  />
+                </div>
+
+                <!-- Dynamic Placeholders Bar -->
+                <div class="variables-bar">
+                  <span class="variables-label">Click to insert dynamic variable:</span>
+                  <div class="variables-list">
+                    <span class="var-badge" @click="insertVariable('{{targetName}}')">{{targetName}}</span>
+                    <span class="var-badge" @click="insertVariable('{{company}}')">{{company}}</span>
+                    <span class="var-badge" @click="insertVariable('{{offering}}')">{{offering}}</span>
+                    <span class="var-badge" @click="insertVariable('{{pitch}}')">{{pitch}}</span>
+                    <span class="var-badge" @click="insertVariable('{{roles}}')">{{roles}}</span>
+                    <span class="var-badge" @click="insertVariable('{{portfolioUrl}}')">{{portfolioUrl}}</span>
+                    <span class="var-badge" @click="insertVariable('{{resumeUrl}}')">{{resumeUrl}}</span>
+                    <span class="var-badge" @click="insertVariable('{{bookingUrl}}')">{{bookingUrl}}</span>
+                    <span class="var-badge" @click="insertVariable('{{icp}}')">{{icp}}</span>
+                  </div>
+                </div>
+              </div>
+
               <!-- Provider Picker Buttons -->
               <div class="provider-selector-grid" style="margin-top: 20px;">
                 <div 
@@ -1026,7 +1111,9 @@ import {
   updateInboxLimit,
   batchUpdateInboxLimits,
   toggleAutoPilot,
-  previewAutoPilot
+  previewAutoPilot,
+  saveSystemPrompts,
+  resetSystemPrompts
 } from '@/request/outreach.js';
 
 const route = useRoute();
@@ -1092,11 +1179,13 @@ async function runAutoPilotTest() {
   testResult.value = null;
   try {
     const settings = testLead.campaignType === 'job_hunting' ? jobForm : harveyForm;
+    const activePrompt = systemPrompts[testLead.campaignType] || systemPrompts.global;
     const res = await previewAutoPilot({
       targetEmail: testLead.targetEmail,
       targetName: testLead.targetName,
       company: testLead.company,
       campaignType: testLead.campaignType,
+      systemPrompt: activePrompt,
       settings
     });
     const payload = res?.data || res;
@@ -1326,6 +1415,10 @@ async function fetchData() {
       }
 
       // Populate LLM provider configurations
+      if (data.systemPrompts) {
+        Object.assign(systemPrompts, data.systemPrompts);
+      }
+
       if (Array.isArray(data.llmConfigs)) {
         data.llmConfigs.forEach(cfg => {
           const prov = llmProviders.value.find(p => p.id === cfg.provider);
@@ -1341,6 +1434,54 @@ async function fetchData() {
   } finally {
     loading.value = false;
   }
+}
+
+const activePromptMode = ref('service_outreach');
+const savingPrompt = ref(false);
+const resettingPrompt = ref(false);
+const systemPrompts = reactive({
+  job_hunting: '',
+  service_outreach: '',
+  global: ''
+});
+
+async function handleSaveSystemPrompts() {
+  savingPrompt.value = true;
+  try {
+    await saveSystemPrompts(systemPrompts);
+    ElMessage.success('AI system prompt saved successfully!');
+  } catch (err) {
+    ElMessage.error(err.message || 'Failed to save system prompt');
+  } finally {
+    savingPrompt.value = false;
+  }
+}
+
+async function handleResetSystemPrompts() {
+  try {
+    await ElMessageBox.confirm(
+      'Reset this system prompt to the high-converting default template?',
+      'Reset Prompt',
+      { confirmButtonText: 'Reset', cancelButtonText: 'Cancel', type: 'warning' }
+    );
+    resettingPrompt.value = true;
+    const res = await resetSystemPrompts(activePromptMode.value);
+    const data = res?.data || res;
+    if (data && data[activePromptMode.value] !== undefined) {
+      systemPrompts[activePromptMode.value] = data[activePromptMode.value];
+    }
+    ElMessage.success('System prompt reset to default');
+  } catch (e) {
+    // cancelled or error
+  } finally {
+    resettingPrompt.value = false;
+  }
+}
+
+function insertVariable(varName) {
+  const current = systemPrompts[activePromptMode.value] || '';
+  systemPrompts[activePromptMode.value] = current ? current + ' ' + varName : varName;
+  ElMessage.info(`Inserted ${varName}`);
 }
 
 const testingConnection = ref(false);
@@ -2155,6 +2296,150 @@ onMounted(async () => {
 }
 
 /* LLM Provider Styles */
+/* AI System Prompt Card */
+.system-prompt-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-top: 18px;
+  margin-bottom: 20px;
+}
+
+.prompt-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.prompt-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 720px;
+}
+
+.prompt-icon-box {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: #eef2ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.prompt-heading {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+}
+
+.prompt-subheading {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.45;
+  margin-top: 3px;
+}
+
+.prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.prompt-mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.mode-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border-radius: 7px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mode-pill:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.mode-pill.active {
+  background: #4f46e5;
+  color: #ffffff;
+  border-color: #4f46e5;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(79, 70, 229, 0.25);
+}
+
+.prompt-editor-wrapper {
+  margin-bottom: 10px;
+}
+
+.system-prompt-textarea :deep(.el-textarea__inner) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  background: #ffffff;
+  border-radius: 8px;
+}
+
+.variables-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+}
+
+.variables-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.variables-list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.var-badge {
+  font-family: monospace;
+  font-size: 11.5px;
+  color: #4f46e5;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 5px;
+  padding: 2px 7px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.var-badge:hover {
+  background: #4f46e5;
+  color: #ffffff;
+  border-color: #4f46e5;
+}
+
 /* Failover Pool Visualizer */
 .failover-pool-card {
   background: #f8fafc;
