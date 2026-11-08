@@ -14,6 +14,10 @@
               <Icon icon="fluent:arrow-sync-20-regular" width="18" height="18" style="margin-right: 6px;" />
               Refresh
             </el-button>
+            <el-button type="danger" plain :loading="loading" @click="handleClearAllLeads">
+              <Icon icon="fluent:delete-dismiss-24-regular" width="18" height="18" style="margin-right: 6px;" />
+              Reset Stats
+            </el-button>
             <el-button type="primary" @click="openCreateCampaignDialog">
               <Icon icon="fluent:folder-add-24-filled" width="18" height="18" style="margin-right: 6px;" />
               Create Campaign (+ Lead List)
@@ -894,6 +898,15 @@
                     <el-option label="Sent" value="sent" />
                     <el-option label="Replied" value="replied" />
                   </el-select>
+                  <el-button 
+                    type="danger" 
+                    plain 
+                    @click="handleClearAllLeads" 
+                    :loading="loadingLeads"
+                  >
+                    <Icon icon="fluent:delete-dismiss-24-regular" style="margin-right: 4px;" />
+                    Reset Stats / Clear Leads
+                  </el-button>
                 </div>
               </div>
 
@@ -1113,7 +1126,8 @@ import {
   toggleAutoPilot,
   previewAutoPilot,
   saveSystemPrompts,
-  resetSystemPrompts
+  resetSystemPrompts,
+  clearAllOutreachLeads
 } from '@/request/outreach.js';
 
 const route = useRoute();
@@ -1386,7 +1400,7 @@ function parseRawLeads(rawText = '') {
 }
 
 const replyRate = computed(() => {
-  if (!stats.sent_count) return 0;
+  if (!stats.sent_count || stats.sent_count === 0) return '0.0';
   return ((stats.replied_count / stats.sent_count) * 100).toFixed(1);
 });
 
@@ -1711,6 +1725,33 @@ async function loadLeads() {
   } catch (err) {
     ElMessage.error(err.message || 'Failed to load leads list');
   } finally {
+    loadingLeads.value = false;
+  }
+}
+
+async function handleClearAllLeads() {
+  try {
+    await ElMessageBox.confirm(
+      'Are you sure you want to delete all leads from the database and reset all dashboard outreach stats to zero?',
+      'Reset Outreach Stats',
+      {
+        confirmButtonText: 'Yes, Reset to 0',
+        cancelButtonText: 'Cancel',
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger'
+      }
+    );
+    loading.value = true;
+    loadingLeads.value = true;
+    await clearAllOutreachLeads();
+    ElMessage.success('All outreach leads cleared. Stats reset to 0.');
+    await Promise.all([fetchData(), loadLeads()]);
+  } catch (err) {
+    if (err !== 'cancel') {
+      ElMessage.error(err.message || 'Failed to clear leads');
+    }
+  } finally {
+    loading.value = false;
     loadingLeads.value = false;
   }
 }

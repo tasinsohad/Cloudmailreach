@@ -91,3 +91,8 @@ export function saveSystemPrompts(data) {
 export function resetSystemPrompts(type = 'all') {
     return http.post('/outreach/system-prompts/reset', { type });
 }
+
+export function clearAllOutreachLeads() {
+    return http.post('/outreach/leads/clear-all');
+}
+

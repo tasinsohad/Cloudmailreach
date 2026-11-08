@@ -523,10 +523,10 @@ app.get('/outreach/dashboard', async (c) => {
 		db.prepare(`
 			SELECT 
 				COUNT(*) as total_leads,
-				SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) as queued_count,
-				SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as sent_count,
-				SUM(CASE WHEN status = 'replied' THEN 1 ELSE 0 END) as replied_count,
-				SUM(CASE WHEN status = 'bounced' THEN 1 ELSE 0 END) as bounced_count
+				COALESCE(SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END), 0) as queued_count,
+				COALESCE(SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END), 0) as sent_count,
+				COALESCE(SUM(CASE WHEN status = 'replied' THEN 1 ELSE 0 END), 0) as replied_count,
+				COALESCE(SUM(CASE WHEN status = 'bounced' THEN 1 ELSE 0 END), 0) as bounced_count
 			FROM outreach_lead
 		`).first(),
 		db.prepare(`SELECT account_id, email, name, status, daily_send_limit FROM account WHERE is_del = 0 ORDER BY account_id ASC`).all(),
@@ -580,7 +580,13 @@ app.get('/outreach/dashboard', async (c) => {
 		data: {
 			autopilot: autoPilotEnabled,
 			campaigns: campaignsRes.results || [],
-			stats: leadsStatsRes || { total_leads: 0, queued_count: 0, sent_count: 0, replied_count: 0, bounced_count: 0 },
+			stats: {
+				total_leads: Number(leadsStatsRes?.total_leads) || 0,
+				queued_count: Number(leadsStatsRes?.queued_count) || 0,
+				sent_count: Number(leadsStatsRes?.sent_count) || 0,
+				replied_count: Number(leadsStatsRes?.replied_count) || 0,
+				bounced_count: Number(leadsStatsRes?.bounced_count) || 0
+			},
 			accounts: accountsWithStats,
 			domains: {
 				all: domains,
@@ -766,6 +772,17 @@ app.post('/outreach/lead/delete', async (c) => {
 	const { leadId } = await c.req.json();
 	await c.env.db.prepare(`DELETE FROM outreach_lead WHERE lead_id = ?`).bind(leadId).run();
 	return c.json({ code: 200, message: 'Lead deleted' });
+});
+
+// Clear all leads (reset stats to 0)
+app.post('/outreach/leads/clear-all', async (c) => {
+	const db = c.env.db;
+	await db.prepare(`DELETE FROM outreach_lead`).run();
+	return c.json({
+		code: 200,
+		message: 'All outreach leads cleared successfully and dashboard stats reset to 0',
+		data: { total_leads: 0, queued_count: 0, sent_count: 0, replied_count: 0, bounced_count: 0 }
+	});
 });
 
 // 10. Dispatch batch with domain rotation
