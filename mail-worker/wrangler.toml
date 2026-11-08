@@ -34,5 +34,4 @@ crons = ["0 * * * *"]
 jwt_secret = "9e33ea42a966b86bae2eabe0c8a0953291c27df32598730ba624424daf21da41"
 domain = ["technetocrat.org", "swiftsuretech.com", "nccwtech.com", "saiftechnology.com"]
 admin = "tasin@technetocrat.org"
-# brevo_api_key can be configured in Cloudflare Dashboard / wrangler secrets
-brevo_api_key = ""
+# brevo_api_key configured via wrangler secret

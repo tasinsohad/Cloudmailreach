@@ -412,7 +412,7 @@ const emailService = {
 
 		const domain = emailUtils.getDomain(accountRow.email);
 		const resendToken = resendTokens[domain];
-		const brevoApiKey = c.env.brevo_api_key;
+		const brevoApiKey = c.env.BREVO_API_KEY || c.env.brevo_api_key;
 		const isBrevoDomain = ['nccwtech.com', 'saiftechnology.com'].includes(domain);
 		const useCloudflareEmail = !!c.env.email;
 
