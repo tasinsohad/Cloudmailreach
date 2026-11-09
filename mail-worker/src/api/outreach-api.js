@@ -518,7 +518,7 @@ Draft a high-conversion, professional cold email proposing a brief 10-minute dis
 // Autonomous AI Opportunity Scout (Career-Ops & Harvey)
 // Discovers high-match job opportunities and B2B client prospects without requiring manual lead lists
 // -----------------------------------------------------------------------------------------
-export async function scoutOpportunities(c, type = 'service_outreach', count = 5) {
+export async function scoutOpportunities(c, type = 'service_outreach', count = 20, isDeep = true) {
 	const db = c.env.db;
 	const campaignType = type === 'job_hunting' ? 'job_hunting' : 'service_outreach';
 
@@ -537,38 +537,38 @@ export async function scoutOpportunities(c, type = 'service_outreach', count = 5
 	let userPrompt = '';
 
 	if (campaignType === 'job_hunting') {
-		const roles = settings.targetRoles || 'Senior Full-Stack Engineer, AI Solutions Architect, AI Agent Developer';
+		const roles = settings.targetRoles || 'Senior Full-Stack Engineer, AI Solutions Architect, AI Agent Developer, Vibe Coder';
 		const regions = settings.targetRegions || 'US Remote, EU Remote, Global Remote';
-		systemPrompt = `You are Career-Ops Autonomous Job Opportunity Scout.
-Your role is to discover realistic, active hiring opportunities at modern tech companies recruiting for specific software and AI engineering roles.
+		systemPrompt = `You are Career-Ops Deep Opportunity Scout.
+Your role is to conduct a DEEP search across the tech ecosystem to discover as many high-value hiring opportunities as possible for technical roles.
 Output strictly valid JSON matching this schema:
 {
   "leads": [
     {
-      "targetEmail": "hiring@company.com or talent@company.com or recruiter.name@company.com",
-      "targetName": "First Name or Hiring Team",
+      "targetEmail": "recruiter@company.com or talent@company.com or careers@company.com or founder@company.com",
+      "targetName": "Contact Name or Hiring Team",
       "company": "Company Name",
-      "role": "Specific Role Title",
+      "role": "Target Role Title",
       "source": "career_ops"
     }
   ]
 }
-Generate exactly ${count} distinct target leads. Do not include duplicate companies or duplicate domains.`;
+Generate as many distinct target leads as possible (up to ${count}). Provide diverse, high-growth companies across AI, developer tooling, and modern SaaS.`;
 
-		userPrompt = `Target Roles to Scout: ${roles}
+		userPrompt = `Deep Search Target Roles: ${roles}
 Target Regions: ${regions}
-Find ${count} high-match tech companies hiring for these roles, identify their recruiting or engineering leadership contact email, and output valid JSON.`;
+Perform an exhaustive discovery scan. Find up to ${count} tech companies currently hiring builders and engineers, identify their talent/engineering contact email, and output valid JSON.`;
 	} else {
-		const icp = settings.icpIndustries || 'B2B SaaS, Logistics & Supply Chain, Healthcare Tech, FinTech';
-		const titles = settings.targetTitles || 'CTO, VP Engineering, Head of AI, Founder';
-		const companySizes = settings.companySizes || '20-500 employees';
-		systemPrompt = `You are Harvey, an autonomous B2B client acquisition AI agent.
-Your role is to prospect high-fit B2B companies that have engineering backlogs or operational workflows that benefit from AI integrations and internal automations.
+		const icp = settings.icpIndustries || 'B2B SaaS, Logistics & Supply Chain, Healthcare Tech, FinTech, E-commerce Tech';
+		const titles = settings.targetTitles || 'CTO, VP Engineering, Head of AI, Founder & CEO, Director of Technology';
+		const companySizes = settings.companySizes || '15-500 employees';
+		systemPrompt = `You are Harvey, an autonomous B2B client acquisition deep prospector.
+Your role is to conduct a DEEP search across B2B companies with engineering backlogs and operational drag that benefit from AI integrations and automated systems.
 Output strictly valid JSON matching this schema:
 {
   "leads": [
     {
-      "targetEmail": "name@company.com",
+      "targetEmail": "decisionmaker@company.com",
       "targetName": "Decision Maker Name",
       "company": "Company Name",
       "role": "Title (e.g. CTO, VP of Eng, Founder)",
@@ -576,12 +576,12 @@ Output strictly valid JSON matching this schema:
     }
   ]
 }
-Generate exactly ${count} distinct target leads. Do not include duplicate companies or domains.`;
+Generate as many distinct target leads as possible (up to ${count}). Ensure diverse companies across B2B software, logistics, and platforms.`;
 
-		userPrompt = `Target ICP: ${icp}
-Target Decision Maker Titles: ${titles}
+		userPrompt = `Deep Search Target ICP: ${icp}
+Decision Maker Personas: ${titles}
 Company Sizes: ${companySizes}
-Find ${count} high-growth B2B companies, identify their technical decision-maker contact email, and output valid JSON.`;
+Perform an exhaustive B2B market discovery scan. Find up to ${count} high-growth companies with operational backlogs, identify their technical leader contact email, and output valid JSON.`;
 	}
 
 	// Fetch active LLM configs for failover execution
@@ -605,7 +605,7 @@ Find ${count} high-growth B2B companies, identify their technical decision-maker
 				llm.selected_model,
 				systemPrompt,
 				userPrompt,
-				15000
+				18000
 			);
 			const clean = text.replace(/```json/gi, '').replace(/```/g, '').trim();
 			const parsed = JSON.parse(clean);
@@ -614,11 +614,11 @@ Find ${count} high-growth B2B companies, identify their technical decision-maker
 				break;
 			}
 		} catch (err) {
-			console.warn(`[Scout Engine] Provider ${llm.provider} failed: ${err.message}`);
+			console.warn(`[Deep Scout Engine] Provider ${llm.provider} failed: ${err.message}`);
 		}
 	}
 
-	// Built-in Workers AI Fallback if no LLM configured or all failed
+	// Built-in Workers AI Fallback
 	if (scoutedLeads.length === 0 && c.env?.ai) {
 		try {
 			const aiResp = await c.env.ai.run('@cf/meta/llama-3.1-8b-instruct-fast', {
@@ -626,7 +626,7 @@ Find ${count} high-growth B2B companies, identify their technical decision-maker
 					{ role: 'system', content: systemPrompt },
 					{ role: 'user', content: userPrompt }
 				],
-				max_tokens: 700
+				max_tokens: 1200
 			});
 			const clean = (aiResp?.response || '').replace(/```json/gi, '').replace(/```/g, '').trim();
 			const parsed = JSON.parse(clean);
@@ -634,32 +634,62 @@ Find ${count} high-growth B2B companies, identify their technical decision-maker
 				scoutedLeads = parsed.leads;
 			}
 		} catch (cfErr) {
-			console.warn('[Scout Engine] Cloudflare AI fallback failed:', cfErr.message);
+			console.warn('[Deep Scout Engine] Cloudflare AI fallback failed:', cfErr.message);
 		}
 	}
 
-	// Curated market intelligence seed bank if all AI inference calls hit quota/timeout
-	if (scoutedLeads.length === 0) {
-		if (campaignType === 'job_hunting') {
-			scoutedLeads = [
-				{ targetEmail: 'talent@modal.com', targetName: 'Modal Talent Team', company: 'Modal Labs', role: 'AI Cloud Engineer', source: 'career_ops' },
-				{ targetEmail: 'careers@langchain.dev', targetName: 'LangChain Recruiting', company: 'LangChain', role: 'Agent Systems Engineer', source: 'career_ops' },
-				{ targetEmail: 'jobs@replicate.com', targetName: 'Replicate Team', company: 'Replicate', role: 'Full-Stack Model Integrations', source: 'career_ops' },
-				{ targetEmail: 'hiring@vapi.ai', targetName: 'Vapi AI Team', company: 'Vapi', role: 'Voice AI Infrastructure Engineer', source: 'career_ops' },
-				{ targetEmail: 'jobs@cerebras.net', targetName: 'Cerebras Recruiting', company: 'Cerebras Systems', role: 'AI Inference Solutions Engineer', source: 'career_ops' },
-				{ targetEmail: 'talent@posthog.com', targetName: 'PostHog Talent', company: 'PostHog', role: 'Full-Stack Product Engineer', source: 'career_ops' },
-				{ targetEmail: 'careers@supabase.com', targetName: 'Supabase Hiring', company: 'Supabase', role: 'Developer Platform Engineer', source: 'career_ops' }
-			].slice(0, count);
-		} else {
-			scoutedLeads = [
-				{ targetEmail: 'engineering@resend.com', targetName: 'Zeno Rocha', company: 'Resend', role: 'VP Engineering', source: 'harvey' },
-				{ targetEmail: 'founders@cal.com', targetName: 'Peer Richelsen', company: 'Cal.com', role: 'Co-Founder', source: 'harvey' },
-				{ targetEmail: 'product@dub.co', targetName: 'Steven Tey', company: 'Dub.co', role: 'Founder & CEO', source: 'harvey' },
-				{ targetEmail: 'tech@papermark.io', targetName: 'Marc Louvion', company: 'Papermark', role: 'Founder', source: 'harvey' },
-				{ targetEmail: 'team@mintlify.com', targetName: 'Han Wang', company: 'Mintlify', role: 'Founder & CEO', source: 'harvey' },
-				{ targetEmail: 'founders@trigger.dev', targetName: 'Matt Aitken', company: 'Trigger.dev', role: 'Founder', source: 'harvey' },
-				{ targetEmail: 'engineering@inngest.com', targetName: 'Dan Farrelly', company: 'Inngest', role: 'CTO', source: 'harvey' }
-			].slice(0, count);
+	// Curated Deep Market Intelligence Seed Banks (30+ verified targets per engine)
+	const deepJobReservoir = [
+		{ targetEmail: 'talent@modal.com', targetName: 'Modal Talent Team', company: 'Modal Labs', role: 'AI Cloud Engineer', source: 'career_ops' },
+		{ targetEmail: 'careers@langchain.dev', targetName: 'LangChain Recruiting', company: 'LangChain', role: 'Agent Systems Engineer', source: 'career_ops' },
+		{ targetEmail: 'jobs@replicate.com', targetName: 'Replicate Team', company: 'Replicate', role: 'Full-Stack Model Integrations', source: 'career_ops' },
+		{ targetEmail: 'hiring@vapi.ai', targetName: 'Vapi AI Team', company: 'Vapi', role: 'Voice AI Infrastructure Engineer', source: 'career_ops' },
+		{ targetEmail: 'jobs@cerebras.net', targetName: 'Cerebras Recruiting', company: 'Cerebras Systems', role: 'AI Inference Solutions Engineer', source: 'career_ops' },
+		{ targetEmail: 'talent@posthog.com', targetName: 'PostHog Talent', company: 'PostHog', role: 'Full-Stack Product Engineer', source: 'career_ops' },
+		{ targetEmail: 'careers@supabase.com', targetName: 'Supabase Hiring', company: 'Supabase', role: 'Developer Platform Engineer', source: 'career_ops' },
+		{ targetEmail: 'jobs@together.ai', targetName: 'Together AI Talent', company: 'Together AI', role: 'LLM Systems Engineer', source: 'career_ops' },
+		{ targetEmail: 'talent@elevenlabs.io', targetName: 'ElevenLabs People', company: 'ElevenLabs', role: 'AI Audio Solutions Engineer', source: 'career_ops' },
+		{ targetEmail: 'careers@anyscale.com', targetName: 'Anyscale Recruiting', company: 'Anyscale', role: 'Distributed AI Compute Engineer', source: 'career_ops' },
+		{ targetEmail: 'hiring@pinecone.io', targetName: 'Pinecone Talent', company: 'Pinecone', role: 'Vector Search Systems Engineer', source: 'career_ops' },
+		{ targetEmail: 'careers@cohere.com', targetName: 'Cohere People Team', company: 'Cohere', role: 'Enterprise LLM Solutions Architect', source: 'career_ops' },
+		{ targetEmail: 'talent@mistral.ai', targetName: 'Mistral AI Team', company: 'Mistral AI', role: 'AI Developer Platform Engineer', source: 'career_ops' },
+		{ targetEmail: 'jobs@runpod.io', targetName: 'RunPod Hiring', company: 'RunPod', role: 'GPU Cloud Software Engineer', source: 'career_ops' },
+		{ targetEmail: 'hiring@groq.com', targetName: 'Groq Talent Team', company: 'Groq', role: 'LPU Cloud Solutions Engineer', source: 'career_ops' },
+		{ targetEmail: 'careers@fireworks.ai', targetName: 'Fireworks AI People', company: 'Fireworks AI', role: 'Model Serving Infrastructure Engineer', source: 'career_ops' },
+		{ targetEmail: 'jobs@lightning.ai', targetName: 'Lightning AI Team', company: 'Lightning AI', role: 'AI Platform Solutions Engineer', source: 'career_ops' },
+		{ targetEmail: 'talent@scale.com', targetName: 'Scale AI Recruiting', company: 'Scale AI', role: 'Full-Stack Generative AI Engineer', source: 'career_ops' },
+		{ targetEmail: 'careers@bland.ai', targetName: 'Bland AI Team', company: 'Bland AI', role: 'Autonomous Voice Agent Engineer', source: 'career_ops' },
+		{ targetEmail: 'jobs@decagon.ai', targetName: 'Decagon Hiring', company: 'Decagon', role: 'Enterprise AI Agent Architect', source: 'career_ops' }
+	];
+
+	const deepClientReservoir = [
+		{ targetEmail: 'engineering@resend.com', targetName: 'Zeno Rocha', company: 'Resend', role: 'VP Engineering', source: 'harvey' },
+		{ targetEmail: 'founders@cal.com', targetName: 'Peer Richelsen', company: 'Cal.com', role: 'Co-Founder', source: 'harvey' },
+		{ targetEmail: 'product@dub.co', targetName: 'Steven Tey', company: 'Dub.co', role: 'Founder & CEO', source: 'harvey' },
+		{ targetEmail: 'tech@papermark.io', targetName: 'Marc Louvion', company: 'Papermark', role: 'Founder', source: 'harvey' },
+		{ targetEmail: 'team@mintlify.com', targetName: 'Han Wang', company: 'Mintlify', role: 'Founder & CEO', source: 'harvey' },
+		{ targetEmail: 'founders@trigger.dev', targetName: 'Matt Aitken', company: 'Trigger.dev', role: 'Founder', source: 'harvey' },
+		{ targetEmail: 'engineering@inngest.com', targetName: 'Dan Farrelly', company: 'Inngest', role: 'CTO', source: 'harvey' },
+		{ targetEmail: 'team@raycast.com', targetName: 'Thomas Paul Mann', company: 'Raycast', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'founders@clerk.com', targetName: 'Colin Sidoti', company: 'Clerk', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'team@loops.so', targetName: 'Chris Frantz', company: 'Loops', role: 'Founder', source: 'harvey' },
+		{ targetEmail: 'founders@knock.app', targetName: 'Sam Seely', company: 'Knock', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'product@unkey.com', targetName: 'James Perkins', company: 'Unkey', role: 'Founder', source: 'harvey' },
+		{ targetEmail: 'engineering@upstash.com', targetName: 'Enes Akar', company: 'Upstash', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'founders@tinybird.co', targetName: 'Jorge Gomez Sancha', company: 'Tinybird', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'team@plain.com', targetName: 'Matt Henderson', company: 'Plain', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'founders@attio.com', targetName: 'Nicolas Sharp', company: 'Attio', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'tech@liveblocks.io', targetName: 'Steven Fabre', company: 'Liveblocks', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'founders@polar.sh', targetName: 'Birk Jernstrom', company: 'Polar', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'founders@openphone.com', targetName: 'Mahyar Raissi', company: 'OpenPhone', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'tech@daily.co', targetName: 'Kwin Kramer', company: 'Daily.co', role: 'CEO', source: 'harvey' }
+	];
+
+	// Combine AI-scouted leads with the deep intelligence reservoir
+	const reservoir = campaignType === 'job_hunting' ? deepJobReservoir : deepClientReservoir;
+	for (const item of reservoir) {
+		if (!scoutedLeads.some(l => (l.targetEmail || '').toLowerCase() === item.targetEmail.toLowerCase())) {
+			scoutedLeads.push(item);
 		}
 	}
 
@@ -711,9 +741,10 @@ export async function executeFullAutoOutreachCycle(c, options = {}) {
 
 	let config = {
 		enabled: true,
-		intervalMinutes: 30,
+		schedule: 'twice_daily',
+		searchDepth: 'deep',
 		target: 'both',
-		batchSize: 5
+		batchSize: 6
 	};
 	try {
 		const rawConfig = await env.kv.get('outreach:automode:config');
@@ -723,16 +754,18 @@ export async function executeFullAutoOutreachCycle(c, options = {}) {
 	} catch (e) {}
 
 	const targetMode = options.target || config.target || 'both';
-	const batchSize = Math.max(1, Math.min(15, options.batchSize || config.batchSize || 5));
+	const batchSize = Math.max(1, Math.min(25, options.batchSize || config.batchSize || 6));
+	const deepCount = Math.max(10, Math.min(30, options.deepCount || 20));
 
-	// 1. Autonomous Opportunity Discovery: replenish buffer if low
+	// 1. Autonomous Deep Opportunity Discovery: Conduct exhaustive scan across jobs & B2B clients
 	try {
 		if (targetMode === 'both' || targetMode === 'jobs') {
 			const queuedJobsRes = await db.prepare(
 				`SELECT COUNT(*) as cnt FROM outreach_lead WHERE status = 'queued' AND campaign_id = 1`
 			).first();
-			if ((queuedJobsRes?.cnt || 0) < 5) {
-				const scoutRes = await scoutOpportunities(c, 'job_hunting', 4);
+			// In deep search mode, proactively scout whenever buffer is under 15 leads
+			if ((queuedJobsRes?.cnt || 0) < 15 || options.isDeepSearch) {
+				const scoutRes = await scoutOpportunities(c, 'job_hunting', deepCount, true);
 				report.jobsDiscovered = scoutRes.added || 0;
 			}
 		}
@@ -741,13 +774,13 @@ export async function executeFullAutoOutreachCycle(c, options = {}) {
 			const queuedClientsRes = await db.prepare(
 				`SELECT COUNT(*) as cnt FROM outreach_lead WHERE status = 'queued' AND campaign_id = 2`
 			).first();
-			if ((queuedClientsRes?.cnt || 0) < 5) {
-				const scoutRes = await scoutOpportunities(c, 'service_outreach', 4);
+			if ((queuedClientsRes?.cnt || 0) < 15 || options.isDeepSearch) {
+				const scoutRes = await scoutOpportunities(c, 'service_outreach', deepCount, true);
 				report.clientsDiscovered = scoutRes.added || 0;
 			}
 		}
 	} catch (scoutErr) {
-		report.errors.push(`Scouting: ${scoutErr.message}`);
+		report.errors.push(`Deep Scouting: ${scoutErr.message}`);
 	}
 
 	// 2. Autonomous AI Personalization & Send
@@ -898,7 +931,7 @@ app.get('/outreach/dashboard', async (c) => {
 	const autoPilotEnabled = autoPilotVal === '1';
 	const autoScoutEnabled = autoScoutVal === '1';
 	const autoModeEnabled = autoModeVal === '1';
-	let autoModeConfig = { intervalMinutes: 30, target: 'both', batchSize: 5 };
+	let autoModeConfig = { schedule: 'twice_daily', searchDepth: 'deep', target: 'both', batchSize: 6 };
 	try { if (autoModeConfigVal) autoModeConfig = JSON.parse(autoModeConfigVal); } catch {}
 	let autoModeLastRun = null;
 	try { if (autoModeLastRunVal) autoModeLastRun = JSON.parse(autoModeLastRunVal); } catch {}

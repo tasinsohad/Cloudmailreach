@@ -42,11 +42,6 @@ export default {
 	},
 	email: email,
 	async scheduled(c, env, ctx) {
-		if (c.cron === '*/30 * * * *') {
-			await analysisService.refreshEchartsCache({ env });
-			return;
-		}
-
 		await verifyRecordService.clearRecord({ env });
 		await userService.resetDaySendCount({ env });
 		await emailService.completeReceiveAll({ env });
@@ -58,8 +53,12 @@ export default {
 		try {
 			const autoModeVal = await env.kv.get('outreach:automode:enabled');
 			if (autoModeVal === '1') {
-				console.log('[Auto Mode Cron] Full Autonomous Auto Mode is ACTIVE. Running cycle...');
-				await executeFullAutoOutreachCycle({ env });
+				const isDeepCron = (c.cron === '0 9,18 * * *');
+				console.log('[Auto Mode Cron] Full Autonomous Auto Mode is ACTIVE (cron: ' + c.cron + ', isDeep: ' + isDeepCron + '). Running cycle...');
+				await executeFullAutoOutreachCycle({ env }, {
+					isDeepSearch: isDeepCron,
+					deepCount: isDeepCron ? 25 : 10
+				});
 			} else {
 				// Standard drip fallback if any campaign is manually set to Active
 				const activeCampaigns = await env.db.prepare(`

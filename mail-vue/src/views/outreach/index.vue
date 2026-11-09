@@ -113,7 +113,11 @@
                 <div class="automode-badges" v-if="autoModeEnabled">
                   <span class="auto-badge">
                     <Icon icon="fluent:clock-16-regular" width="14" height="14" />
-                    Cadence: Every {{ autoModeConfig.intervalMinutes || 30 }} mins
+                    Cadence: {{ autoModeConfig.schedule === 'twice_daily' ? 'Twice a Day (9 AM & 6 PM Deep Scan)' : (autoModeConfig.schedule === 'once_daily' ? 'Once a Day' : (autoModeConfig.schedule === 'every_6h' ? 'Every 6 Hours' : 'Twice a Day (Deep Scan)')) }}
+                  </span>
+                  <span class="auto-badge" style="color: #4f46e5; background: #eef2ff;">
+                    <Icon icon="fluent:radar-16-filled" width="14" height="14" />
+                    Depth: {{ autoModeConfig.searchDepth === 'fast' ? 'Fast Scan' : 'Deep Search (Max Yield: 20-50+ leads)' }}
                   </span>
                   <span class="auto-badge">
                     <Icon icon="fluent:target-16-regular" width="14" height="14" />
@@ -141,10 +145,10 @@
                   type="success" 
                   size="small" 
                   :loading="runningAutoCycle" 
-                  @click="handleRunAutoCycleNow"
+                  @click="handleRunAutoCycleNow(true)"
                 >
-                  <Icon icon="fluent:play-16-filled" width="16" height="16" style="margin-right: 4px;" />
-                  Run Auto Cycle Now
+                  <Icon icon="fluent:flash-sparkle-16-filled" width="16" height="16" style="margin-right: 4px;" />
+                  ⚡ Run Deep Search & Outreach Now
                 </el-button>
                 <el-button 
                   size="small" 
@@ -201,7 +205,7 @@
           </div>
         </div>
 
-        <!-- Direct Section Quick Switcher -->
+        <!-- Unified Section Navigation -->
         <div class="tabs-quick-nav">
           <button 
             type="button" 
@@ -209,8 +213,8 @@
             :class="{ active: activeTab === 'campaigns' }" 
             @click="activeTab = 'campaigns'"
           >
-            <Icon icon="fluent:server-multiple-20-regular" width="16" height="16" />
-            <span>Campaigns & Limits</span>
+            <Icon icon="fluent:rocket-20-regular" width="16" height="16" />
+            <span>🚀 Campaigns & Inboxes</span>
           </button>
           <button 
             type="button" 
@@ -218,8 +222,8 @@
             :class="{ active: activeTab === 'job_hunting' }" 
             @click="activeTab = 'job_hunting'"
           >
-            <Icon icon="fluent:hat-graduation-24-regular" width="16" height="16" />
-            <span>Career-Ops (Jobs)</span>
+            <Icon icon="fluent:briefcase-24-regular" width="16" height="16" />
+            <span>💼 Career-Ops (Jobs)</span>
           </button>
           <button 
             type="button" 
@@ -227,8 +231,8 @@
             :class="{ active: activeTab === 'client_hunting' }" 
             @click="activeTab = 'client_hunting'"
           >
-            <Icon icon="fluent:briefcase-24-regular" width="16" height="16" />
-            <span>Harvey (Clients)</span>
+            <Icon icon="fluent:target-arrow-24-regular" width="16" height="16" />
+            <span>🎯 Harvey (Clients)</span>
           </button>
           <button 
             type="button" 
@@ -255,7 +259,7 @@
             @click="activeTab = 'leads'"
           >
             <Icon icon="fluent:people-list-20-regular" width="16" height="16" />
-            <span>Leads Queue</span>
+            <span>📋 Leads Queue</span>
           </button>
         </div>
 
@@ -1232,32 +1236,38 @@
     </el-dialog>
 
     <!-- Dialog: Auto Mode Cadence & Target Settings -->
-    <el-dialog v-model="showAutoModeSettingsModal" title="Full Autonomous Auto Mode Settings" width="500px">
+    <el-dialog v-model="showAutoModeSettingsModal" title="Full Autonomous Auto Mode Settings" width="540px">
       <div style="font-size: 13.5px; color: #64748b; margin-bottom: 16px; line-height: 1.5;">
-        Configure how frequently the autonomous loop checks for fresh opportunities, generates emails, and dispatches them across your 20 inboxes.
+        Configure how frequently the autonomous loop checks for fresh opportunities, generates emails, and dispatches them across your 20 inboxes. Deep Search runs twice a day to source the maximum number of opportunities across all verticals.
       </div>
       <el-form label-position="top">
-        <el-form-item label="Checking & Outreach Interval">
-          <el-select v-model="autoModeConfig.intervalMinutes" style="width: 100%;">
-            <el-option :value="15" label="Every 15 Minutes (High Cadence)" />
-            <el-option :value="30" label="Every 30 Minutes (Recommended Deliverability)" />
-            <el-option :value="60" label="Every 1 Hour (Standard Drip)" />
-            <el-option :value="120" label="Every 2 Hours" />
-            <el-option :value="360" label="Every 6 Hours" />
+        <el-form-item label="Autonomous Sourcing Cadence">
+          <el-select v-model="autoModeConfig.schedule" style="width: 100%;">
+            <el-option value="twice_daily" label="Twice a Day (9:00 AM & 6:00 PM Deep Scan) [Recommended]" />
+            <el-option value="once_daily" label="Once a Day (Deep Scan)" />
+            <el-option value="every_6h" label="Every 6 Hours (Deep Scan)" />
+            <el-option value="every_2h" label="Every 2 Hours" />
+            <el-option value="every_1h" label="Hourly Drip" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Search Depth & Opportunity Yield">
+          <el-select v-model="autoModeConfig.searchDepth" style="width: 100%;">
+            <el-option value="deep" label="Deep Search (Maximum Yield: 20–50+ opportunities per run across all ICPs)" />
+            <el-option value="fast" label="Fast Scan (5–10 opportunities)" />
           </el-select>
         </el-form-item>
         <el-form-item label="Target Opportunities to Scout & Outreach">
           <el-select v-model="autoModeConfig.target" style="width: 100%;">
-            <el-option value="both" label="Both: Job Opportunities (Career-Ops) + B2B Clients (Harvey)" />
+            <el-option value="both" label="Both: High-Growth Jobs (Career-Ops) + B2B Clients (Harvey)" />
             <el-option value="jobs" label="Career-Ops (Job Hunting Opportunities Only)" />
             <el-option value="clients" label="Harvey (B2B Client Prospects Only)" />
           </el-select>
         </el-form-item>
-        <el-form-item label="Batch Size Per Cycle">
+        <el-form-item label="Drip Batch Size Per Delivery Run">
           <el-select v-model="autoModeConfig.batchSize" style="width: 100%;">
-            <el-option :value="3" label="3 Emails per Cycle (Conservative Warmup)" />
-            <el-option :value="5" label="5 Emails per Cycle (Standard Balanced)" />
-            <el-option :value="10" label="10 Emails per Cycle (Maximum Volume)" />
+            <el-option :value="3" label="3 Emails per Run (Conservative Warmup)" />
+            <el-option :value="6" label="6 Emails per Run (Recommended Balanced Drip)" />
+            <el-option :value="10" label="10 Emails per Run (Higher Volume)" />
           </el-select>
         </el-form-item>
       </el-form>
@@ -1345,9 +1355,11 @@ const autoModeEnabled = ref(false);
 const togglingAutoMode = ref(false);
 const runningAutoCycle = ref(false);
 const autoModeConfig = reactive({
-  intervalMinutes: 30,
+  schedule: 'twice_daily',
+  searchDepth: 'deep',
+  intervalMinutes: 720,
   target: 'both',
-  batchSize: 5
+  batchSize: 6
 });
 const autoModeLastRun = ref(null);
 const showAutoModeSettingsModal = ref(false);
@@ -1443,13 +1455,18 @@ async function handleSaveAutoModeSettings() {
   }
 }
 
-async function handleRunAutoCycleNow() {
+async function handleRunAutoCycleNow(isDeep = true) {
   runningAutoCycle.value = true;
   try {
-    const res = await runAutoModeCycleNow({ target: autoModeConfig.target, batchSize: autoModeConfig.batchSize });
+    const res = await runAutoModeCycleNow({ 
+      target: autoModeConfig.target, 
+      batchSize: autoModeConfig.batchSize,
+      isDeepSearch: isDeep,
+      deepCount: 20
+    });
     const report = res?.data || res;
     autoModeLastRun.value = report;
-    ElMessage.success(report?.message || 'Autonomous cycle completed successfully!');
+    ElMessage.success(report?.message || 'Deep Search & autonomous cycle completed successfully!');
     await Promise.all([fetchData(), loadLeads()]);
   } catch (err) {
     ElMessage.error(err.message || 'Auto cycle failed');
@@ -2404,6 +2421,10 @@ onMounted(async () => {
   font-size: 13px;
   color: #697386;
   margin-top: 4px;
+}
+
+:deep(.outreach-tabs > .el-tabs__header) {
+  display: none !important;
 }
 
 .tabs-quick-nav {
