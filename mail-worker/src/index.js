@@ -55,7 +55,7 @@ export default {
 			if (autoModeVal === '1') {
 				const isDeepCron = (c.cron === '0 9,18 * * *');
 				console.log('[Auto Mode Cron] Full Autonomous Auto Mode is ACTIVE (cron: ' + c.cron + ', isDeep: ' + isDeepCron + '). Running cycle...');
-				await executeFullAutoOutreachCycle({ env }, {
+				await executeFullAutoOutreachCycle({ env, executionCtx: ctx }, {
 					isDeepSearch: isDeepCron,
 					deepCount: isDeepCron ? 25 : 10
 				});
@@ -140,6 +140,13 @@ export default {
 							SET status = 'sent', subject = ?, body = ?, sender_email = ?, sent_time = CURRENT_TIMESTAMP 
 							WHERE lead_id = ?
 						`).bind(emailSubject, emailBody, sender.email, lead.lead_id).run();
+
+						// Human-like delay between consecutive emails in fallback scheduled batch
+						if (lead !== leads[leads.length - 1]) {
+							const delaySec = Math.floor(Math.random() * (60 - 30 + 1)) + 30;
+							console.log(`[Scheduled Fallback Drip] Human-like delay: waiting ${delaySec}s before sending next email...`);
+							await new Promise(r => setTimeout(r, delaySec * 1000));
+						}
 					} catch (e) {
 						console.error(`Scheduled outreach dispatch error for ${lead.target_email}:`, e.message);
 					}

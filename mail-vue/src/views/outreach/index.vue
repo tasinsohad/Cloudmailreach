@@ -119,6 +119,10 @@
                     <Icon icon="fluent:radar-16-filled" width="14" height="14" />
                     Depth: {{ autoModeConfig.searchDepth === 'fast' ? 'Fast Scan' : 'Deep Search (Max Yield: 20-50+ leads)' }}
                   </span>
+                  <span class="auto-badge" style="color: #059669; background: #ecfdf5;">
+                    <Icon icon="fluent:person-clock-16-regular" width="14" height="14" />
+                    Human Delay: {{ autoModeConfig.delayMode === 'human_cautious' ? '60s–120s' : (autoModeConfig.delayMode === 'human_fast' ? '15s–30s' : '30s–60s Jitter') }} (Anti-Blasting)
+                  </span>
                   <span class="auto-badge">
                     <Icon icon="fluent:target-16-regular" width="14" height="14" />
                     Target: {{ autoModeConfig.target === 'both' ? 'Jobs (Career-Ops) + Clients (Harvey)' : (autoModeConfig.target === 'jobs' ? 'Jobs Only' : 'Clients Only') }}
@@ -1166,6 +1170,13 @@
         <el-form-item label="Number of Emails to Dispatch">
           <el-input-number v-model="dispatchCount" :min="1" :max="20" style="width: 100%;" />
         </el-form-item>
+        <el-form-item label="Sending Throttle & Human Delay">
+          <el-select v-model="dispatchDelayMode" style="width: 100%;">
+            <el-option value="human_natural" label="Natural Human Sending (30s – 60s randomized jitter) [Recommended]" />
+            <el-option value="human_cautious" label="Conservative Warmup (60s – 120s randomized jitter)" />
+            <el-option value="human_fast" label="Moderate Throttle (15s – 30s randomized jitter)" />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showDispatchModal = false">Cancel</el-button>
@@ -1270,6 +1281,16 @@
             <el-option :value="10" label="10 Emails per Run (Higher Volume)" />
           </el-select>
         </el-form-item>
+        <el-form-item label="Human-like Delay Between Individual Emails (Anti-Blasting)">
+          <el-select v-model="autoModeConfig.delayMode" style="width: 100%;">
+            <el-option value="human_natural" label="Natural Human Sending (30s – 60s randomized jitter) [Recommended]" />
+            <el-option value="human_cautious" label="Conservative Warmup (60s – 120s randomized jitter)" />
+            <el-option value="human_fast" label="Moderate Throttle (15s – 30s randomized jitter)" />
+          </el-select>
+          <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
+            Applies a randomized delay between every outbound email to simulate real human typing and prevent mail servers from detecting automation bursts.
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showAutoModeSettingsModal = false">Cancel</el-button>
@@ -1354,9 +1375,11 @@ const scoutingHarvey = ref(false);
 const autoModeEnabled = ref(false);
 const togglingAutoMode = ref(false);
 const runningAutoCycle = ref(false);
+const dispatchDelayMode = ref('human_natural');
 const autoModeConfig = reactive({
   schedule: 'twice_daily',
   searchDepth: 'deep',
+  delayMode: 'human_natural',
   intervalMinutes: 720,
   target: 'both',
   batchSize: 6
@@ -2080,7 +2103,7 @@ function openDispatchDialog() {
 async function executeDispatch() {
   dispatching.value = true;
   try {
-    const res = await dispatchOutreachBatch(dispatchCampaignId.value, dispatchCount.value);
+    const res = await dispatchOutreachBatch(dispatchCampaignId.value, dispatchCount.value, dispatchDelayMode.value);
     ElMessage.success(res.message || 'Dispatch completed');
     showDispatchModal.value = false;
     await fetchData();

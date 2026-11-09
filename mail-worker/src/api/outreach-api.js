@@ -728,6 +728,26 @@ Perform an exhaustive B2B market discovery scan. Find up to ${count} high-growth
 // Full Autonomous Auto Mode Orchestration Engine
 // Autonomously discovers jobs/clients from time to time, generates AI copy & dispatches
 // -----------------------------------------------------------------------------------------
+export function getHumanDelayMs(mode = 'human_natural', customMin, customMax) {
+	let min = 30;
+	let max = 60;
+	if (mode === 'human_cautious') {
+		min = 60;
+		max = 120;
+	} else if (mode === 'human_fast') {
+		min = 15;
+		max = 30;
+	}
+	if (typeof customMin === 'number' && typeof customMax === 'number' && customMax >= customMin) {
+		min = customMin;
+		max = customMax;
+	}
+	const sec = Math.floor(Math.random() * (max - min + 1)) + min;
+	return sec * 1000;
+}
+
+export const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 export async function executeFullAutoOutreachCycle(c, options = {}) {
 	const env = c.env;
 	const db = env.db;
@@ -743,6 +763,9 @@ export async function executeFullAutoOutreachCycle(c, options = {}) {
 		enabled: true,
 		schedule: 'twice_daily',
 		searchDepth: 'deep',
+		delayMode: 'human_natural',
+		minDelaySeconds: 30,
+		maxDelaySeconds: 60,
 		target: 'both',
 		batchSize: 6
 	};
@@ -811,8 +834,12 @@ export async function executeFullAutoOutreachCycle(c, options = {}) {
 			}
 
 			if (eligibleAccounts.length > 0) {
+				const delayMode = options.delayMode || config.delayMode || 'human_natural';
+				const minDelay = options.minDelaySeconds ?? config.minDelaySeconds;
+				const maxDelay = options.maxDelaySeconds ?? config.maxDelaySeconds;
 				let accountIndex = 0;
-				for (const lead of leads) {
+
+				const sendSingleLead = async (lead) => {
 					let sender = null;
 					for (let i = 0; i < eligibleAccounts.length; i++) {
 						const candidate = eligibleAccounts[accountIndex % eligibleAccounts.length];
@@ -822,7 +849,7 @@ export async function executeFullAutoOutreachCycle(c, options = {}) {
 							break;
 						}
 					}
-					if (!sender) break;
+					if (!sender) return false;
 
 					try {
 						const campRow = await db.prepare(
@@ -854,8 +881,33 @@ export async function executeFullAutoOutreachCycle(c, options = {}) {
 						`).bind(emailSubject, emailBody, sender.email, lead.lead_id).run();
 
 						report.dispatched++;
+						return true;
 					} catch (sendErr) {
 						report.errors.push(`Send to ${lead.target_email}: ${sendErr.message}`);
+						return false;
+					}
+				};
+
+				// Send first lead immediately
+				await sendSingleLead(leads[0]);
+
+				// Sequentially drip remaining leads with human-like delays to prevent blasting
+				const remainingLeads = leads.slice(1);
+				if (remainingLeads.length > 0) {
+					const dripRemaining = async () => {
+						for (const rLead of remainingLeads) {
+							const delayMs = getHumanDelayMs(delayMode, minDelay, maxDelay);
+							console.log(`[Human Delay] Pausing for ${(delayMs / 1000).toFixed(1)}s before sending next email to mimic natural human typing...`);
+							await sleep(delayMs);
+							await sendSingleLead(rLead);
+						}
+					};
+
+					const executionCtx = c.executionCtx;
+					if (executionCtx && typeof executionCtx.waitUntil === 'function') {
+						executionCtx.waitUntil(dripRemaining());
+					} else {
+						await dripRemaining();
 					}
 				}
 			}
@@ -1166,7 +1218,10 @@ app.post('/outreach/leads/clear-all', async (c) => {
 
 // 10. Dispatch batch with domain rotation
 app.post('/outreach/dispatch-batch', async (c) => {
-	const { campaignId, count = 5 } = await c.req.json();
+	const reqBody = await c.req.json().catch(() => ({}));
+	const campaignId = reqBody.campaignId;
+	const count = Math.max(1, Math.min(20, parseInt(reqBody.count, 10) || 5));
+	const delayMode = reqBody.delayMode || 'human_natural';
 
 	let leadsStmt;
 	if (campaignId) {
@@ -1198,7 +1253,6 @@ app.post('/outreach/dispatch-batch', async (c) => {
 		throw new BizError('No active inboxes available for sending');
 	}
 
-	// Filter inboxes with daily limit remaining
 	const eligibleAccounts = [];
 	for (const acc of allAccounts) {
 		const accId = acc.account_id || acc.accountId;
@@ -1206,19 +1260,14 @@ app.post('/outreach/dispatch-batch', async (c) => {
 		const sentToday = Number(await c.env.kv.get(accountDailyKey) || 0);
 		const limit = acc.daily_send_limit ?? 30;
 		if (sentToday < limit) {
-			eligibleAccounts.push({
-				...acc,
-				accountId: accId,
-				sentToday,
-				limit
-			});
+			eligibleAccounts.push({ ...acc, accountId: accId, sentToday, limit });
 		}
 	}
 
 	if (eligibleAccounts.length === 0) {
 		return c.json({
 			code: 429,
-			message: 'All inboxes have reached their daily sending limits for today. Increase the limits or wait for tomorrow.',
+			message: 'All inboxes have reached their daily sending limits for today. Increase limits or wait for tomorrow.',
 			sentCount: 0
 		});
 	}
@@ -1227,21 +1276,20 @@ app.post('/outreach/dispatch-batch', async (c) => {
 	let accountIdx = 0;
 	let lastError = null;
 
-	for (const lead of leads) {
-		// Find next account that still has remaining quota
+	const sendLead = async (lead) => {
 		let senderAccount = null;
 		for (let attempt = 0; attempt < eligibleAccounts.length; attempt++) {
 			const candidate = eligibleAccounts[accountIdx % eligibleAccounts.length];
 			accountIdx++;
 			if (candidate.sentToday < candidate.limit) {
-				senderAccount = candidate;
+			senderAccount = candidate;
 				break;
 			}
 		}
 
 		if (!senderAccount) {
 			console.log('All eligible inboxes exhausted quota during batch.');
-			break;
+			return false;
 		}
 
 		const accountId = senderAccount.accountId;
@@ -1251,7 +1299,6 @@ app.post('/outreach/dispatch-batch', async (c) => {
 			let emailSubject = lead.subject;
 			let emailBody = lead.body;
 
-			// If Auto-Pilot is ON or if lead has no custom body, autonomously draft personalized email
 			if (isAutoPilot || !emailBody || emailBody.trim().length === 0) {
 				const campRow = await c.env.db.prepare(`SELECT type, settings FROM campaign WHERE campaign_id = ?`).bind(lead.campaign_id).first();
 				let settingsObj = {};
@@ -1281,16 +1328,44 @@ app.post('/outreach/dispatch-batch', async (c) => {
 			`).bind(emailSubject, emailBody, senderAccount.email, lead.lead_id).run();
 
 			sentSuccess++;
+			return true;
 		} catch (err) {
 			console.error(`Failed sending outreach to ${lead.target_email}:`, err.stack || err.message);
 			lastError = err.stack || err.message || String(err);
+			return false;
+		}
+	};
+
+	// Send 1st lead immediately
+	await sendLead(leads[0]);
+
+	// Drip remaining leads with human-like randomized delays in background
+	const remaining = leads.slice(1);
+	if (remaining.length > 0) {
+		const dripRemaining = async () => {
+			for (const rLead of remaining) {
+				const delayMs = getHumanDelayMs(delayMode);
+				console.log(`[Batch Dispatch] Human-like delay: pausing for ${(delayMs / 1000).toFixed(1)}s before sending next email...`);
+				await sleep(delayMs);
+				await sendLead(rLead);
+			}
+		};
+
+		if (c.executionCtx && typeof c.executionCtx.waitUntil === 'function') {
+			c.executionCtx.waitUntil(dripRemaining());
+		} else {
+			await dripRemaining();
 		}
 	}
 
+	const delayDesc = delayMode === 'human_cautious' ? '60s–120s' : (delayMode === 'human_fast' ? '15s–30s' : '30s–60s');
 	return c.json({
 		code: 200,
-		message: `Dispatched ${sentSuccess} emails across rotated inboxes${lastError ? ' (lastError: ' + lastError + ')' : ''}`,
+		message: remaining.length > 0
+			? `1st email sent immediately. Remaining ${remaining.length} emails queued for progressive delivery with human-like delays (${delayDesc} randomized jitter) to avoid blasting.`
+			: `Email dispatched successfully across rotated inboxes.`,
 		sentCount: sentSuccess,
+		queuedRemaining: remaining.length,
 		lastError
 	});
 });
