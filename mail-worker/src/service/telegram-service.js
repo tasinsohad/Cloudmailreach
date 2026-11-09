@@ -98,7 +98,7 @@ const telegramService = {
 					web_app: { url: webAppUrl }
 				},
 				{
-					text: '✉️ Reply in Cloud Mail',
+					text: '✉️ Reply in Cloud Mailreach',
 					url: directReplyUrl
 				}
 			]

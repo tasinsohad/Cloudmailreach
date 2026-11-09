@@ -1,6 +1,6 @@
 /**
  * sync-sourcing-engines.mjs
- * Syncs outreach leads from Career-Ops and Harvey directly into Cloud Mail Outreach Hub.
+ * Syncs outreach leads from Career-Ops and Harvey directly into Cloud Mailreach Outreach Hub.
  */
 
 import fs from 'fs';
@@ -105,11 +105,11 @@ async function syncHarvey(token) {
 }
 
 async function main() {
-  console.log('Authenticating with Cloud Mail...');
+  console.log('Authenticating with Cloud Mailreach...');
   const token = await login();
-  console.log('Syncing Career-Ops leads to Cloud Mail buffer...');
+  console.log('Syncing Career-Ops leads to Cloud Mailreach buffer...');
   await syncCareerOps(token);
-  console.log('Syncing Harvey B2B prospects to Cloud Mail buffer...');
+  console.log('Syncing Harvey B2B prospects to Cloud Mailreach buffer...');
   await syncHarvey(token);
   console.log('All local sourcing engines synced successfully!');
 }

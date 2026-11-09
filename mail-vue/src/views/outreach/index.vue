@@ -994,7 +994,7 @@
                 </div>
 
                 <p class="tg-description">
-                  When a lead replies to any of your 20 inboxes, Cloud Mail forwards the full context to your Telegram bot with a <strong>1-Click Reply</strong> button.
+                  When a lead replies to any of your 20 inboxes, Cloud Mailreach forwards the full context to your Telegram bot with a <strong>1-Click Reply</strong> button.
                 </p>
 
                 <el-form label-position="top" class="tg-form">

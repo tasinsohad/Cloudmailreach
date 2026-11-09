@@ -33,7 +33,7 @@ async function fetchProviderModels(provider, apiKey, baseUrl) {
 			headers: {
 				'Authorization': `Bearer ${apiKey}`,
 				'HTTP-Referer': 'https://cloud-mail.sohad-flowtics.workers.dev',
-				'X-Title': 'Cloud Mail Outreach'
+				'X-Title': 'Cloud Mailreach Outreach'
 			}
 		});
 		if (!res.ok) {
@@ -240,7 +240,7 @@ export async function executeProviderChat(provider, apiKey, baseUrl, model, syst
 					'Content-Type': 'application/json',
 					'Authorization': `Bearer ${apiKey}`,
 					'HTTP-Referer': 'https://cloud-mail.sohad-flowtics.workers.dev',
-					'X-Title': 'Cloud Mail Outreach'
+					'X-Title': 'Cloud Mailreach Outreach'
 				},
 				signal: controller.signal,
 				body: JSON.stringify({
@@ -1832,7 +1832,7 @@ app.post('/outreach/telegram/test', async (c) => {
 	}
 
 	const appBaseUrl = 'https://cloud-mail.sohad-flowtics.workers.dev';
-	const testText = `🤖 <b>[Cloud Mail Outreach Test]</b>\n\n` +
+	const testText = `🤖 <b>[Cloud Mailreach Outreach Test]</b>\n\n` +
 		`✅ Your Telegram notification system is successfully connected!\n\n` +
 		`• <b>Active Inboxes:</b> 20 mailboxes\n` +
 		`• <b>Connected Domains:</b> technetocrat.org, swiftsuretech.com, nccwtech.com, saiftechnology.com\n` +
@@ -1850,7 +1850,7 @@ app.post('/outreach/telegram/test', async (c) => {
 				inline_keyboard: [
 					[
 						{
-							text: '🚀 Open Cloud Mail Dashboard',
+							text: '🚀 Open Cloud Mailreach Dashboard',
 							url: `${appBaseUrl}/#/outreach`
 						}
 					]

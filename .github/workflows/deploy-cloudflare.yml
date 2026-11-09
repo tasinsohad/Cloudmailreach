@@ -1,4 +1,4 @@
-name: 🚀 Deploy cloud-mail to Cloudflare Workers
+name: 🚀 Deploy Cloud Mailreach to Cloudflare Workers
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  Deploy-cloud-mail:
+  Deploy-cloud-mailreach:
     name: 🏗️ Build and Deploy
     runs-on: ubuntu-latest
 

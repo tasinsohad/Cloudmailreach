@@ -1,154 +1,213 @@
 <p align="center">
-    <img src="doc/demo/logo.png" width="80px" />
-    <h1 align="center">Cloud Mail</h1>
-    <p align="center">An all-in-one email service platform powered by Cloudflare</p>
+    <img src="doc/demo/logo.png" width="90px" alt="Cloud Mailreach Logo" />
+    <h1 align="center">Cloud Mailreach</h1>
+    <p align="center"><strong>Autonomous AI Cold Outreach & Serverless Mail Ecosystem</strong></p>
+    <p align="center">Powered by Cloudflare Workers, D1, Career-Ops & Harvey Engines</p>
     <p align="center">
         <a href="https://www.cloudflare.com/" target="_blank">
             <img src="https://img.shields.io/badge/Cloudflare-F38020?labelColor=F38020&amp;color=F38020&amp;logo=cloudflare&amp;logoColor=white" alt="Cloudflare" />
         </a>
-        <a href="https://github.com/maillab/cloud-mail/releases" target="_blank" >
-            <img src="https://img.shields.io/github/v/release/maillab/cloud-mail?logo=github&amp;logoColor=white" alt="releases" />
+        <a href="https://github.com/tasinsohad/Cloudmailreach/releases" target="_blank">
+            <img src="https://img.shields.io/github/v/release/tasinsohad/Cloudmailreach?logo=github&amp;logoColor=white" alt="releases" />
         </a>
-        <a href="https://github.com/maillab/cloud-mail/tree/main?tab=MIT-1-ov-file" target="_blank" >
-            <img src="https://img.shields.io/badge/license-MIT-green" />
+        <a href="https://github.com/tasinsohad/Cloudmailreach/blob/main/LICENSE" target="_blank">
+            <img src="https://img.shields.io/badge/license-MIT-green" alt="License" />
         </a>
     </p>
     <p align="center">
-        <a href="https://skymail.ink">Live Demo</a> · <a href="https://docs.skymail.ink/en/">Deployment Guide</a> ·
+        <a href="https://cloud-mail.sohad-flowtics.workers.dev">Live Application</a> · 
+        <a href="#quick-start">Deployment Guide</a> · 
         <a href="/README.md">简体中文</a> | English
-    </p>
-    <p align="center">
-        <a href="https://trendshift.io/repositories/20459" target="_blank" >
-            <img src="https://trendshift.io/api/badge/repositories/20459" alt="trendshift" >
-        </a>
-        <a href="https://hellogithub.com/repository/1b1da1f9ae4c4175baa3d762b4e0ba41" target="_blank">
-            <img src="https://api.hellogithub.com/v1/widgets/recommend.svg?rid=1b1da1f9ae4c4175baa3d762b4e0ba41" alt="HelloGitHub" />
-        </a>
     </p>
 </p>
 
-## Description
-With only one domain, you can create multiple different email addresses, similar to major email platforms. This project can be deployed on Cloudflare Workers to reduce server costs and build your own email service.
-## Project Showcase
+---
 
-| ![](/doc/demo/en/demo.jpg)  | ![](/doc/demo/en/demo1.jpg) |
-|-----------------------------|-----------------------------|
-| ![](/doc/demo/en/demo2.jpg) | ![](/doc/demo/en/demo3.jpg) |
+## 🚀 Overview
 
-## Recommended Project
+**Cloud Mailreach** is an end-to-end autonomous email operations and AI cold outreach platform running 100% serverless at the edge on Cloudflare. 
 
-<table>
-  <tr>
-    <td valign="middle">
-      <a href="https://github.com/pixtalelab/pixtale">
-        <img width="30" src="https://img.022335.xyz/logo.png" alt="Pixtale" align="middle">
-      </a>
-    </td>
-    <td valign="middle">
-      <a href="https://github.com/pixtalelab/pixtale">Pixtale</a>
-    </td>
-    <td valign="middle">
-      A self-hosted cloud storage photo album app
-    </td>
-  </tr>
-</table>
+It unifies a multi-domain enterprise-grade webmail client with two autonomous AI sourcing & outreach engines:
+1. **💼 Career-Ops**: Discovers software engineering jobs, remote opportunities, and tech hiring teams, qualifying leads and pitching tailored applications.
+2. **🎯 Harvey**: Sources B2B corporate prospects, founders, CTOs, and decision-makers, researching tech stacks to send high-converting partnership pitches.
 
-## Features
+With **zero dedicated server hosting fees**, Cloud Mailreach handles scheduled lead sourcing, target-timezone delivery windows, anti-spam randomized delays, multi-inbox rotation, and instant Telegram reply notifications.
 
-- **💰 Low-Cost Usage**: No server required — deploy to Cloudflare Workers to reduce costs.
+---
 
-- **💻 Responsive Design**: Automatically adapts to both desktop and most mobile browsers.
+## 🌟 Key Highlights
 
-- **📧 Email Sending**: Integrated with Cloudflare Email and Resend for sending email.
+### 🤖 Autonomous Outreach Engines
+- **Career-Ops (Autonomous Job Hunter)**:
+  - Continuously searches web sources (Hacker News *Who is Hiring*, GitHub Jobs, RemoteOK, Jobicy, Himalayas, DevITJobs, Arxiv, and DuckDuckGo).
+  - Evaluates job posts against developer profile strengths, tech stack criteria, and salary expectations.
+  - Automatically synthesizes hyper-personalized cold cover emails addressing exact company pain points.
+- **Harvey (Autonomous Client Acquisition)**:
+  - Deep-scrapes company info, decision-maker contacts (CTO, VP Eng, Founder), and tech infrastructures.
+  - Generates value-first consultative email proposals with natural, non-templated copywriting.
+- **Autonomous Auto Mode (2x Daily Sourcing)**:
+  - Built-in Cloudflare Worker cron triggers run twice daily deep sweeps (`0 9,18 * * *`).
+  - Searches $\rightarrow$ Qualifies $\rightarrow$ Generates Drafts $\rightarrow$ Schedules Timezone Drips without any manual intervention.
 
-- **🛡️ Admin Features**: Admin controls for user and email management with RBAC-based access control.
+### ⏰ Deliverability & Human Sending Engine
+- **Target-Timezone Awareness**: Restricts email dispatching to business hours (09:00 AM – 06:00 PM) in each prospect's regional timezone so messages land at the top of their morning inbox.
+- **Anti-Spam Human Drip**: Enforces randomized human-like delays (45 to 120 seconds between sends) to safeguard domain reputation and preserve SPF/DKIM/DMARC health.
+- **Multi-Domain Inbox Swarm**: Rotates dispatches seamlessly across your connected domains (`technetocrat.org`, `swiftsuretech.com`, `nccwtech.com`, `saiftechnology.com`, etc.).
+- **Visual Sent Mail Badging**: Identifies dispatched emails immediately in the sent mailbox and detail viewer with dedicated badges (`💼 Career-Ops` vs `🎯 Harvey`).
 
-- **📦 Attachment Support**: Send and receive attachments, stored and downloaded via R2 object storage.
+### 📱 Responsive Outreach Command Center
+- **Mobile-First Glassmorphism UI**: Access and control the entire outreach lifecycle from smartphones, tablets, or widescreen monitors.
+- **Live Pipeline Metrics**: Visual gauges for total prospects sourced, queued, emailed, responded, and bounce/error rates.
+- **One-Click Manual Controls**: Trigger instant deep searches, test Telegram connections, or dispatch batches on-demand.
+- **AI Model Switcher**: Seamlessly toggle between OpenRouter (Claude 3.5 Sonnet, DeepSeek V3/R1, GPT-4o) and Workers AI.
 
-- **🔔 Email Push**: Forward received emails to Telegram bots or other email providers.
+### ✉️ Full Serverless Webmail System
+- **Multi-Domain Inbox Management**: Unlimited custom domain aliases, catch-all routing, and instant disposable email addresses.
+- **Multi-Provider Dispatch**: High-deliverability routing via Cloudflare Email Routing, Resend, or Brevo.
+- **Rich Attachments via R2**: Direct S3-compatible file storage powered by Cloudflare R2.
+- **Instant Telegram Push**: Forward incoming messages to Telegram with a **1-Click Reply** shortcut.
+- **Verification Code AI Extractor**: Automatically detects 2FA verification codes and OTP tokens in received mail using Cloudflare Workers AI.
 
-- **📡 Open API**: Supports batch user creation via API and multi-condition email queries
+---
 
-- **🔢 Verification Code Recognition**: Auto-detect codes via Workers AI
+## 🛠️ Tech Stack & Architecture
 
-- **📈 Data Visualization**: Use ECharts to visualize system data, including user email growth.
+| Layer | Technologies |
+| :--- | :--- |
+| **Edge Compute** | [Cloudflare Workers](https://developers.cloudflare.com/workers/) (Hono Web Framework) |
+| **Database** | [Cloudflare D1](https://developers.cloudflare.com/d1/) (Serverless SQLite + Drizzle ORM) |
+| **Caching & KV** | [Cloudflare KV](https://developers.cloudflare.com/kv/) |
+| **Object Storage**| [Cloudflare R2](https://developers.cloudflare.com/r2/) (S3 API) |
+| **Frontend UI** | [Vue 3](https://vuejs.org/), [Element Plus](https://element-plus.org/), [Vite](https://vitejs.dev/), [Pinia](https://pinia.vuejs.org/), [ECharts](https://echarts.apache.org/) |
+| **AI Inference** | [OpenRouter](https://openrouter.ai/) / [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/) |
+| **Email Delivery**| Cloudflare Email Routing / [Resend](https://resend.com/) / [Brevo](https://www.brevo.com/) |
 
-- **🎨 Personalization**: Customize website title, login background, and transparency.
+---
 
-- **🤖 CAPTCHA**: Integrated with Turnstile CAPTCHA to prevent automated registration.
-
-- **📜 More Features**: Under development...
-
-## Tech Stack
-
-- **Platform**: [Cloudflare Workers](https://developers.cloudflare.com/workers/)
-
-- **Web Framework**: [Hono](https://hono.dev/)
-
-- **ORM**: [Drizzle](https://orm.drizzle.team/)
-
-- **Frontend Framework**: [Vue3](https://vuejs.org/)
-
-- **UI Framework**: [Element Plus](https://element-plus.org/)
-
-- **Email Sending**: [Cloudflare Email](https://developers.cloudflare.com/email-service/) / [Resend](https://resend.com/)
-
-- **Cache**: [Cloudflare KV](https://developers.cloudflare.com/kv/)
-
-- **Database**: [Cloudflare D1](https://developers.cloudflare.com/d1/)
-
-- **File Storage**: [Cloudflare R2](https://developers.cloudflare.com/r2/)
-
-## Project Structure
+## 📁 Repository Structure
 
 ```
-cloud-mail
-├── mail-worker                    # Backend worker project
+Cloudmailreach
+├── mail-worker                     # Serverless Cloudflare Worker Backend
 │   ├── src
-│   │   ├── api                    # API layer
-│   │   ├── const                  # Project constants
-│   │   ├── dao                    # Data access layer
-│   │   ├── email                  # Email processing and handling
-│   │   ├── entity                 # Database entities
-│   │   ├── error                  # Custom exceptions
-│   │   ├── hono                   # Web framework, middleware, error handling
-│   │   ├── i18n                   # Internationalization
-│   │   ├── init                   # Database and cache initialization
-│   │   ├── model                  # Response data models
-│   │   ├── security               # Authentication and authorization
-│   │   ├── service                # Business logic layer
-│   │   ├── template               # Message templates
-│   │   ├── utils                  # Utility functions
-│   │   └── index.js               # Entry point
-│   ├── package.json               # Project dependencies
-│   └── wrangler.toml              # Project configuration
+│   │   ├── api                     # REST API routers (outreach, email, admin, auth)
+│   │   ├── const                   # System constants and enum mappings
+│   │   ├── entity                  # Drizzle ORM database schemas (email, leads, campaigns)
+│   │   ├── hono                    # Hono app instance, middlewares & CORS
+│   │   ├── init                    # Database initialization & automated D1 migrations
+│   │   ├── security                # JWT authentication & RBAC permissions
+│   │   ├── service                 # Core business logic (Email, Outreach, Telegram, AI)
+│   │   ├── utils                   # Sourcing parsers, timezone logic, formatting
+│   │   └── index.js                # Worker entry point & Scheduled Cron Handlers
+│   ├── package.json
+│   └── wrangler.toml               # Cloudflare configuration & bindings
 │
-├── mail-vue                       # Frontend Vue project
+├── mail-vue                        # Vue 3 Single Page Application (SPA)
 │   ├── src
-│   │   ├── axios                  # Axios configuration
-│   │   ├── components             # Custom components
-│   │   ├── echarts                # ECharts integration
-│   │   ├── i18n                   # Internationalization
-│   │   ├── init                   # Startup initialization
-│   │   ├── layout                 # Main layout components
-│   │   ├── perm                   # Permissions and access control
-│   │   ├── request                # API request layer
-│   │   ├── router                 # Router configuration
-│   │   ├── store                  # Global state management
-│   │   ├── utils                  # Utility functions
-│   │   ├── views                  # Page components
-│   │   ├── app.vue                # Root component
-│   │   ├── main.js                # Entry JS file
-│   │   └── style.css              # Global styles
-│   ├── package.json               # Project dependencies
-└── └── env.release                # Environment configuration
-
+│   │   ├── components              # Shared UI components (email-scroll, rich editor)
+│   │   ├── views
+│   │   │   ├── outreach            # Outreach Hub (Career-Ops & Harvey Dashboard)
+│   │   │   ├── send                # Sent mailbox view with campaign badging
+│   │   │   ├── content             # Email detail reader
+│   │   │   ├── inbox               # Multi-inbox viewer
+│   │   │   └── sys-setting         # System configuration & account management
+│   │   ├── router                  # Vue Router configuration
+│   │   └── store                   # Pinia state stores
+│   ├── package.json
+│   └── index.html                  # HTML entry point with responsive viewport
+│
+├── sync-sourcing-engines.mjs       # Bridge script for syncing external sourcing queues
+└── README.md                       # Documentation
 ```
 
-## License
+---
 
-This project is licensed under the [MIT](LICENSE) license.
+## ⚡ Quick Start
 
-## Communication
+### 1. Prerequisites
+- [Node.js](https://nodejs.org/) (v20+) and [pnpm](https://pnpm.io/)
+- [Cloudflare Account](https://dash.cloudflare.com/)
+- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) installed (`npm install -g wrangler`)
 
-[Telegram](https://t.me/cloud_mail_tg)
+### 2. Clone the Repository
+```bash
+git clone https://github.com/tasinsohad/Cloudmailreach.git
+cd Cloudmailreach
+```
+
+### 3. Configure Backend (`mail-worker`)
+In `mail-worker/wrangler.toml`, ensure your Cloudflare resources are bound:
+```toml
+name = "cloud-mail"
+main = "src/index.js"
+compatibility_date = "2025-06-04"
+
+[[d1_databases]]
+binding = "db"
+database_name = "cloud-mail-db"
+database_id = "<YOUR_D1_DATABASE_ID>"
+
+[[kv_namespaces]]
+binding = "kv"
+id = "<YOUR_KV_NAMESPACE_ID>"
+
+[triggers]
+crons = ["0 9,18 * * *", "0 * * * *"]
+
+[vars]
+jwt_secret = "<YOUR_RANDOM_SECRET>"
+domain = ["yourdomain1.com", "yourdomain2.com"]
+admin = "admin@yourdomain1.com"
+```
+
+Configure confidential secrets via Wrangler:
+```bash
+npx wrangler secret put brevo_api_key -c mail-worker/wrangler.toml
+```
+
+### 4. Build the Frontend
+```bash
+cd mail-vue
+pnpm install
+pnpm build
+cd ..
+```
+The compiled assets will be written directly into `mail-worker/dist`.
+
+### 5. Deploy to Cloudflare Workers
+```bash
+cd mail-worker
+pnpm install
+npx wrangler deploy
+```
+
+---
+
+## ⚙️ How Autonomous Outreach Works
+
+```mermaid
+flowchart TD
+    A["Cloudflare Cron Trigger\n(09:00 & 18:00 UTC)"] --> B["Autonomous Cycle Triggered"]
+    B --> C["Deep Search & Discovery Engine\n(HN Who's Hiring, GitHub, RemoteOK, DDG)"]
+    C --> D["AI Lead Qualification & Scoring"]
+    D --> E["Personalized Pitch Generation\n(Career-Ops / Harvey)"]
+    E --> F["Timezone Window Check\n(Recipient Local Business Hours: 9am-6pm)"]
+    F -- "Within Hours" --> G["Randomized Human Delay (45-120s)"]
+    F -- "After Hours" --> H["Queued for Next Window"]
+    G --> I["Multi-Inbox Dispatch Rotation\n(technetocrat.org, swiftsuretech.com)"]
+    I --> J["Sent Mail Tagged with 💼 Career-Ops / 🎯 Harvey"]
+    J --> K["Telegram Webhook Alert on Lead Reply"]
+```
+
+---
+
+## 📄 License
+
+This project is open-source under the [MIT License](LICENSE).
+
+---
+
+## 🤝 Community & Support
+
+- **Repository**: [tasinsohad/Cloudmailreach](https://github.com/tasinsohad/Cloudmailreach)
+- **Issues & Requests**: [GitHub Issues](https://github.com/tasinsohad/Cloudmailreach/issues)
