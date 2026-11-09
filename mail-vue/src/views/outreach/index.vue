@@ -123,6 +123,10 @@
                     <Icon icon="fluent:person-clock-16-regular" width="14" height="14" />
                     Human Delay: {{ autoModeConfig.delayMode === 'human_cautious' ? '60s–120s' : (autoModeConfig.delayMode === 'human_fast' ? '15s–30s' : '30s–60s Jitter') }} (Anti-Blasting)
                   </span>
+                  <span class="auto-badge" style="color: #0284c7; background: #f0f9ff;">
+                    <Icon icon="fluent:globe-clock-16-regular" width="14" height="14" />
+                    Country Business Hours: 9:00 AM – 5:00 PM (Local Time)
+                  </span>
                   <span class="auto-badge">
                     <Icon icon="fluent:target-16-regular" width="14" height="14" />
                     Target: {{ autoModeConfig.target === 'both' ? 'Jobs (Career-Ops) + Clients (Harvey)' : (autoModeConfig.target === 'jobs' ? 'Jobs Only' : 'Clients Only') }}
@@ -1065,6 +1069,23 @@
                     {{ row.company || '-' }}
                   </template>
                 </el-table-column>
+                <el-table-column label="Country & Local Time" min-width="210">
+                  <template #default="{ row }">
+                    <div style="display: flex; flex-direction: column; gap: 3px;">
+                      <span style="font-weight: 600; font-size: 13px; color: #1e293b;">
+                        {{ row.country || 'United States' }}
+                      </span>
+                      <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                        <span style="font-size: 12px; color: #64748b; font-family: monospace;">
+                          {{ row.local_time ? row.local_time + ' ' + (row.weekday || '') : '09:00 AM' }}
+                        </span>
+                        <el-tag size="small" :type="row.is_window_open !== false ? 'success' : 'warning'" effect="plain" round>
+                          {{ row.is_window_open !== false ? '🟢 Open (9am–5pm)' : '🟡 Holding (Off-hours)' }}
+                        </el-tag>
+                      </div>
+                    </div>
+                  </template>
+                </el-table-column>
                 <el-table-column prop="campaign_name" label="Campaign" min-width="170">
                   <template #default="{ row }">
                     <el-tag size="small" :type="row.campaign_type === 'job_hunting' ? 'success' : 'primary'">
@@ -1176,6 +1197,14 @@
             <el-option value="human_cautious" label="Conservative Warmup (60s – 120s randomized jitter)" />
             <el-option value="human_fast" label="Moderate Throttle (15s – 30s randomized jitter)" />
           </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-checkbox v-model="dispatchRespectTimeWindow">
+            Enforce Country-wise Business Hours (09:00 AM – 05:00 PM local time)
+          </el-checkbox>
+          <div style="font-size: 12px; color: #64748b; margin-top: 2px;">
+            Prevents delivering late at night or on weekends in each prospect's country.
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -1291,6 +1320,28 @@
             Applies a randomized delay between every outbound email to simulate real human typing and prevent mail servers from detecting automation bursts.
           </div>
         </el-form-item>
+        <el-form-item label="Country-Wise Preferable Business Hours Gate">
+          <div style="display: flex; gap: 10px; width: 100%;">
+            <el-select v-model="autoModeConfig.windowStartHour" placeholder="Start Hour" style="flex: 1;">
+              <el-option :value="8" label="8:00 AM Local Time" />
+              <el-option :value="9" label="9:00 AM Local Time [Recommended]" />
+              <el-option :value="10" label="10:00 AM Local Time" />
+            </el-select>
+            <el-select v-model="autoModeConfig.windowEndHour" placeholder="End Hour" style="flex: 1;">
+              <el-option :value="17" label="5:00 PM Local Time [Recommended]" />
+              <el-option :value="18" label="6:00 PM Local Time" />
+              <el-option :value="19" label="7:00 PM Local Time" />
+            </el-select>
+          </div>
+          <div style="margin-top: 8px;">
+            <el-checkbox v-model="autoModeConfig.weekdaysOnly">
+              Send on Business Days Only (Monday – Friday, skip weekends)
+            </el-checkbox>
+          </div>
+          <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
+            Emails will always start during preferable daytime hours in the recipient's country and timezone. Off-hours leads are safely held until morning.
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showAutoModeSettingsModal = false">Cancel</el-button>
@@ -1376,10 +1427,14 @@ const autoModeEnabled = ref(false);
 const togglingAutoMode = ref(false);
 const runningAutoCycle = ref(false);
 const dispatchDelayMode = ref('human_natural');
+const dispatchRespectTimeWindow = ref(true);
 const autoModeConfig = reactive({
   schedule: 'twice_daily',
   searchDepth: 'deep',
   delayMode: 'human_natural',
+  windowStartHour: 9,
+  windowEndHour: 17,
+  weekdaysOnly: true,
   intervalMinutes: 720,
   target: 'both',
   batchSize: 6
@@ -2103,7 +2158,7 @@ function openDispatchDialog() {
 async function executeDispatch() {
   dispatching.value = true;
   try {
-    const res = await dispatchOutreachBatch(dispatchCampaignId.value, dispatchCount.value, dispatchDelayMode.value);
+    const res = await dispatchOutreachBatch(dispatchCampaignId.value, dispatchCount.value, dispatchDelayMode.value, dispatchRespectTimeWindow.value);
     ElMessage.success(res.message || 'Dispatch completed');
     showDispatchModal.value = false;
     await fetchData();

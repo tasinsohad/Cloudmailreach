@@ -8,7 +8,7 @@ import oauthService from './service/oauth-service';
 import analysisService from './service/analysis-service';
 import dayjs from 'dayjs';
 import kvConst from './const/kv-const';
-import { generateAutonomousEmail, scoutOpportunities, executeFullAutoOutreachCycle } from './api/outreach-api';
+import { generateAutonomousEmail, scoutOpportunities, executeFullAutoOutreachCycle, detectLeadCountryAndTimezone, isWithinPreferableWindow } from './api/outreach-api';
 
 export default {
 	async fetch(req, env, ctx) {
@@ -70,11 +70,23 @@ export default {
 				const leadsRes = await env.db.prepare(`
 					SELECT * FROM outreach_lead 
 					WHERE campaign_id = ? AND status = 'queued' 
-					ORDER BY lead_id ASC LIMIT ?
-				`).bind(camp.campaign_id, batchSize).all();
+					ORDER BY lead_id ASC LIMIT 25
+				`).bind(camp.campaign_id).all();
 
-				const leads = leadsRes.results || [];
-				if (leads.length === 0) continue;
+				const allLeads = leadsRes.results || [];
+				if (allLeads.length === 0) continue;
+
+				// Filter to leads currently inside their country's business hours (9:00 AM - 5:00 PM local time)
+				const eligible = allLeads.filter(lead => {
+					const tzInfo = detectLeadCountryAndTimezone(lead);
+					return isWithinPreferableWindow(lead.timezone || tzInfo.timezone).allowed;
+				});
+
+				const leads = eligible.slice(0, batchSize);
+				if (leads.length === 0) {
+					console.log(`[Scheduled Drip] Campaign ${camp.campaign_id} leads currently outside local country business hours. Holding until morning window.`);
+					continue;
+				}
 
 				const dateStr = dayjs().format('YYYY-MM-DD');
 				const accountsRes = await env.db.prepare(`

@@ -36,8 +36,8 @@ export function deleteOutreachLead(leadId) {
     return http.post('/outreach/lead/delete', { leadId });
 }
 
-export function dispatchOutreachBatch(campaignId, count, delayMode = 'human_natural') {
-    return http.post('/outreach/dispatch-batch', { campaignId, count, delayMode });
+export function dispatchOutreachBatch(campaignId, count, delayMode = 'human_natural', respectTimeWindow = true) {
+    return http.post('/outreach/dispatch-batch', { campaignId, count, delayMode, respectTimeWindow });
 }
 
 export function updateTelegramSettings(tgBotToken, tgChatId) {

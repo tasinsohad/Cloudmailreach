@@ -708,11 +708,12 @@ Perform an exhaustive B2B market discovery scan. Find up to ${count} high-growth
 			const company = (lead.company || email.split('@')[1] || '').trim();
 			const source = campaignType === 'job_hunting' ? 'career_ops' : 'harvey';
 
+			const tzInfo = detectLeadCountryAndTimezone({ targetEmail: email, company, role: lead.role });
 			await db.prepare(`
 				INSERT INTO outreach_lead 
-				(campaign_id, target_email, target_name, company, source, subject, body, status)
-				VALUES (?, ?, ?, ?, ?, '', '', 'queued')
-			`).bind(campaignId, email, name, company, source).run();
+				(campaign_id, target_email, target_name, company, source, country, timezone, subject, body, status)
+				VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 'queued')
+			`).bind(campaignId, email, name, company, source, tzInfo.country, tzInfo.timezone).run();
 
 			addedLeads.push({ targetEmail: email, targetName: name, company, role: lead.role || '', source });
 		}
@@ -728,6 +729,152 @@ Perform an exhaustive B2B market discovery scan. Find up to ${count} high-growth
 // Full Autonomous Auto Mode Orchestration Engine
 // Autonomously discovers jobs/clients from time to time, generates AI copy & dispatches
 // -----------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------------------
+// Country-Wise Preferable Business Hours & Timezone Engine
+// -----------------------------------------------------------------------------------------
+
+export function detectLeadCountryAndTimezone(lead) {
+	if (lead.timezone && lead.country) {
+		return { country: lead.country, timezone: lead.timezone };
+	}
+
+	const email = (lead.targetEmail || lead.target_email || '').toLowerCase().trim();
+	const company = (lead.company || '').toLowerCase().trim();
+
+	// 1. Domain TLD matching
+	if (email.endsWith('.uk') || email.endsWith('.co.uk')) {
+		return { country: 'United Kingdom', timezone: 'Europe/London' };
+	}
+	if (email.endsWith('.de')) {
+		return { country: 'Germany', timezone: 'Europe/Berlin' };
+	}
+	if (email.endsWith('.fr')) {
+		return { country: 'France', timezone: 'Europe/Paris' };
+	}
+	if (email.endsWith('.ca')) {
+		return { country: 'Canada', timezone: 'America/Toronto' };
+	}
+	if (email.endsWith('.au') || email.endsWith('.com.au')) {
+		return { country: 'Australia', timezone: 'Australia/Sydney' };
+	}
+	if (email.endsWith('.sg')) {
+		return { country: 'Singapore', timezone: 'Asia/Singapore' };
+	}
+	if (email.endsWith('.in') || email.endsWith('.co.in')) {
+		return { country: 'India', timezone: 'Asia/Kolkata' };
+	}
+	if (email.endsWith('.nl')) {
+		return { country: 'Netherlands', timezone: 'Europe/Amsterdam' };
+	}
+	if (email.endsWith('.ch')) {
+		return { country: 'Switzerland', timezone: 'Europe/Zurich' };
+	}
+	if (email.endsWith('.jp') || email.endsWith('.co.jp')) {
+		return { country: 'Japan', timezone: 'Asia/Tokyo' };
+	}
+	if (email.endsWith('.se')) {
+		return { country: 'Sweden', timezone: 'Europe/Stockholm' };
+	}
+
+	// 2. Known European tech companies
+	const euCompanies = ['mistral', 'deepmind', 'hopin', 'revolut', 'monzo', 'wise', 'personio', 'synthesia', 'delivery hero'];
+	if (euCompanies.some(c => company.includes(c))) {
+		if (company.includes('mistral') || company.includes('personio')) {
+			return { country: 'France (CET)', timezone: 'Europe/Paris' };
+		}
+		return { country: 'United Kingdom', timezone: 'Europe/London' };
+	}
+
+	// 3. Silicon Valley & US West tech startups
+	const usWestCompanies = ['modal', 'langchain', 'replicate', 'vapi', 'cerebras', 'posthog', 'supabase', 'together', 'fireworks', 'scale ai', 'bland ai', 'cal.com', 'clerk', 'openphone', 'raycast', 'resend', 'dub', 'pinecone', 'anyscale'];
+	if (usWestCompanies.some(c => company.includes(c))) {
+		return { country: 'United States (Pacific)', timezone: 'America/Los_Angeles' };
+	}
+
+	// 4. US East Coast tech startups
+	const usEastCompanies = ['anthropic', 'datadog', 'mongodb', 'cockroach', 'ramen', 'ramp', 'hugging'];
+	if (usEastCompanies.some(c => company.includes(c))) {
+		return { country: 'United States (Eastern)', timezone: 'America/New_York' };
+	}
+
+	// 5. Default B2B US Eastern time (standard business corridor)
+	return { country: 'United States', timezone: 'America/New_York' };
+}
+
+export function getRecipientLocalTime(timezone = 'America/New_York') {
+	try {
+		const formatter = new Intl.DateTimeFormat('en-US', {
+			timeZone: timezone,
+			hour12: false,
+			weekday: 'short',
+			year: 'numeric',
+			month: '2-digit',
+			day: '2-digit',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
+		const parts = formatter.formatToParts(new Date());
+		const getPart = (type) => parts.find(p => p.type === type)?.value;
+		const hour = parseInt(getPart('hour') || '12', 10);
+		const minute = parseInt(getPart('minute') || '0', 10);
+		const weekday = getPart('weekday') || 'Wed';
+		return {
+			hour,
+			minute,
+			weekday,
+			timeStr: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+			isWeekday: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(weekday)
+		};
+	} catch (e) {
+		const now = new Date();
+		const hour = (now.getUTCHours() - 5 + 24) % 24;
+		return {
+			hour,
+			minute: now.getUTCMinutes(),
+			weekday: 'Wed',
+			timeStr: `${String(hour).padStart(2, '0')}:00`,
+			isWeekday: true
+		};
+	}
+}
+
+export function isWithinPreferableWindow(timezone = 'America/New_York', options = {}) {
+	const startHour = options.windowStartHour ?? 9;    // 9:00 AM
+	const endHour = options.windowEndHour ?? 17;        // 5:00 PM (17:00)
+	const weekdaysOnly = options.weekdaysOnly ?? true;  // Skip weekends
+
+	const local = getRecipientLocalTime(timezone);
+
+	if (weekdaysOnly && !local.isWeekday) {
+		return {
+			allowed: false,
+			reason: `Weekend in ${timezone} (${local.weekday}) - holding for Monday morning`,
+			localTime: local.timeStr,
+			weekday: local.weekday,
+			timezone
+		};
+	}
+
+	const isTimeOk = (local.hour >= startHour && local.hour < endHour);
+	if (!isTimeOk) {
+		return {
+			allowed: false,
+			reason: `Outside business hours in ${timezone} (${local.timeStr} ${local.weekday}, optimal: ${startHour}:00 - ${endHour}:00)`,
+			localTime: local.timeStr,
+			weekday: local.weekday,
+			timezone
+		};
+	}
+
+	return {
+		allowed: true,
+		reason: `In optimal window (${local.timeStr} ${local.weekday} in ${timezone})`,
+		localTime: local.timeStr,
+		weekday: local.weekday,
+		timezone
+	};
+}
+
 export function getHumanDelayMs(mode = 'human_natural', customMin, customMax) {
 	let min = 30;
 	let max = 60;
@@ -808,13 +955,39 @@ export async function executeFullAutoOutreachCycle(c, options = {}) {
 
 	// 2. Autonomous AI Personalization & Send
 	try {
-		const leadsRes = await db.prepare(`
+		const allQueuedRes = await db.prepare(`
 			SELECT * FROM outreach_lead 
 			WHERE status = 'queued' 
-			ORDER BY lead_id ASC LIMIT ?
-		`).bind(batchSize).all();
+			ORDER BY lead_id ASC LIMIT 50
+		`).all();
 
-		const leads = leadsRes.results || [];
+		const allQueued = allQueuedRes.results || [];
+		const eligibleLeads = [];
+		const heldLeads = [];
+
+		for (const lead of allQueued) {
+			const tzInfo = detectLeadCountryAndTimezone(lead);
+			const targetTz = lead.timezone || tzInfo.timezone;
+			const windowCheck = isWithinPreferableWindow(targetTz, {
+				windowStartHour: config.windowStartHour || 9,
+				windowEndHour: config.windowEndHour || 17,
+				weekdaysOnly: config.weekdaysOnly !== false
+			});
+
+			if (options.ignoreTimeWindow || windowCheck.allowed) {
+				eligibleLeads.push({ ...lead, tzInfo, windowCheck });
+			} else {
+				heldLeads.push({ ...lead, tzInfo, windowCheck });
+			}
+		}
+
+		if (eligibleLeads.length === 0 && heldLeads.length > 0) {
+			console.log(`[Country Time Gate] All ${heldLeads.length} queued leads are currently outside local country business hours. Holding until optimal morning window (09:00 - 17:00).`);
+			report.heldCount = heldLeads.length;
+			report.heldReason = `Holding ${heldLeads.length} leads until recipient country business hours (09:00 - 17:00 local time).`;
+		}
+
+		const leads = eligibleLeads.slice(0, batchSize);
 		if (leads.length > 0) {
 			const dateStr = dayjs().format('YYYY-MM-DD');
 			const accountsRes = await db.prepare(`
@@ -917,7 +1090,8 @@ export async function executeFullAutoOutreachCycle(c, options = {}) {
 	}
 
 	report.status = report.errors.length === 0 ? 'success' : (report.dispatched > 0 ? 'partial' : 'failed');
-	report.message = `Auto Cycle: Discovered ${report.jobsDiscovered} jobs, ${report.clientsDiscovered} clients. Dispatched ${report.dispatched} emails.`;
+	const heldInfo = report.heldCount ? ` (${report.heldReason})` : '';
+	report.message = `Auto Cycle: Discovered ${report.jobsDiscovered} jobs, ${report.clientsDiscovered} clients. Dispatched ${report.dispatched} emails${heldInfo}.`;
 
 	try {
 		await env.kv.put('outreach:automode:last_run', JSON.stringify(report));
@@ -1169,8 +1343,23 @@ app.get('/outreach/leads', async (c) => {
 
 	const stmt = c.env.db.prepare(query);
 	const res = await (params.length ? stmt.bind(...params) : stmt).all();
+	const rows = (res.results || []).map(l => {
+		const tzInfo = detectLeadCountryAndTimezone(l);
+		const tz = l.timezone || tzInfo.timezone;
+		const local = getRecipientLocalTime(tz);
+		const win = isWithinPreferableWindow(tz);
+		return {
+			...l,
+			country: l.country || tzInfo.country,
+			timezone: tz,
+			local_time: local.timeStr,
+			weekday: local.weekday,
+			is_window_open: win.allowed,
+			window_reason: win.reason
+		};
+	});
 
-	return c.json({ code: 200, data: res.results || [] });
+	return c.json({ code: 200, data: rows });
 });
 
 // 8. Add leads to queue (called by Harvey, Career-Ops, or Dashboard UI)
@@ -1180,19 +1369,24 @@ app.post('/outreach/lead/add', async (c) => {
 
 	const stmt = c.env.db.prepare(`
 		INSERT INTO outreach_lead 
-		(campaign_id, target_email, target_name, company, source, subject, body, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'queued')
+		(campaign_id, target_email, target_name, company, source, country, timezone, subject, body, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued')
 	`);
 
-	const batch = leads.map(l => stmt.bind(
-		l.campaignId || 1,
-		l.targetEmail,
-		l.targetName || '',
-		l.company || '',
-		l.source || 'harvey',
-		l.subject || '',
-		l.body || ''
-	));
+	const batch = leads.map(l => {
+		const tzInfo = detectLeadCountryAndTimezone({ targetEmail: l.targetEmail, company: l.company, country: l.country, timezone: l.timezone });
+		return stmt.bind(
+			l.campaignId || 1,
+			l.targetEmail,
+			l.targetName || '',
+			l.company || '',
+			l.source || 'harvey',
+			tzInfo.country,
+			tzInfo.timezone,
+			l.subject || '',
+			l.body || ''
+		);
+	});
 
 	await c.env.db.batch(batch);
 	return c.json({ code: 200, message: `Added ${leads.length} leads to queue` });
@@ -1238,10 +1432,35 @@ app.post('/outreach/dispatch-batch', async (c) => {
 		`).bind(count);
 	}
 
-	const leadsRes = await leadsStmt.all();
-	const leads = leadsRes.results || [];
-	if (leads.length === 0) {
+	const respectTimeWindow = reqBody.respectTimeWindow !== false;
+	const rawLeadsRes = await leadsStmt.all();
+	const rawLeads = rawLeadsRes.results || [];
+	if (rawLeads.length === 0) {
 		return c.json({ code: 200, message: 'Queue is empty', sentCount: 0 });
+	}
+
+	let leads = rawLeads;
+	let heldLeads = [];
+	if (respectTimeWindow) {
+		leads = [];
+		for (const l of rawLeads) {
+			const tzInfo = detectLeadCountryAndTimezone(l);
+			const win = isWithinPreferableWindow(l.timezone || tzInfo.timezone);
+			if (win.allowed) {
+				leads.push(l);
+			} else {
+				heldLeads.push({ ...l, win });
+			}
+		}
+	}
+
+	if (leads.length === 0 && heldLeads.length > 0) {
+		return c.json({
+			code: 200,
+			message: `Holding ${heldLeads.length} leads: Currently outside recipient country business hours (${heldLeads[0].win.reason}). Optimal window is 9:00 AM - 5:00 PM local time.`,
+			sentCount: 0,
+			heldCount: heldLeads.length
+		});
 	}
 
 	const dateStr = dayjs().format('YYYY-MM-DD');
