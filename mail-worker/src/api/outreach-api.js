@@ -1035,6 +1035,7 @@ export async function executeFullAutoOutreachCycle(c, options = {}) {
 						const emailSubject = generated.subject;
 						const emailBody = generated.body;
 
+						const isCareerOps = (campRow?.type === 'job_hunting' || lead.campaign_id === 1);
 						await emailService.send(c, {
 							accountId: sender.accountId,
 							receiveEmail: [lead.target_email],
@@ -1043,6 +1044,8 @@ export async function executeFullAutoOutreachCycle(c, options = {}) {
 							text: emailBody || '',
 							content: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: #111; line-height: 1.6;">${(emailBody || '').replace(/\n/g, '<br/>')}</div>`,
 							sendType: 'new',
+							outreachSource: isCareerOps ? 'career_ops' : 'harvey',
+							outreachCampaign: isCareerOps ? 'Career-Ops (Jobs)' : 'Harvey (Clients)',
 							attachments: []
 						}, 1);
 
@@ -1527,6 +1530,7 @@ app.post('/outreach/dispatch-batch', async (c) => {
 				emailBody = generated.body;
 			}
 
+			const isCareerOps = (campRow?.type === 'job_hunting' || lead.campaign_id === 1);
 			await emailService.send(c, {
 				accountId: accountId,
 				receiveEmail: [lead.target_email],
@@ -1535,6 +1539,8 @@ app.post('/outreach/dispatch-batch', async (c) => {
 				text: emailBody || '',
 				content: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: #111; line-height: 1.6;">${(emailBody || '').replace(/\n/g, '<br/>')}</div>`,
 				sendType: 'new',
+				outreachSource: isCareerOps ? 'career_ops' : 'harvey',
+				outreachCampaign: isCareerOps ? 'Career-Ops (Jobs)' : 'Harvey (Clients)',
 				attachments: []
 			}, 1);
 

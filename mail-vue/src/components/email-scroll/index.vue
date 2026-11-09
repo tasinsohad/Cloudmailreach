@@ -84,6 +84,14 @@
                     <span class="email-subject" :style="(item.unread === EmailUnreadEnum.UNREAD && showUnread)  ? 'font-weight: bold' : ''">
                       <div class="unread" v-if="!isMobile && (item.unread === EmailUnreadEnum.UNREAD && showUnread) "/>
                       <span v-if="item.code" class="code-tag" @click.stop="copyCode(item.code)">[{{ t('codeLabel') }}{{ item.code }}]</span>
+                      <span v-if="item.outreachSource === 'career_ops' || item.outreach_source === 'career_ops'" class="outreach-email-pill career">
+                        <Icon icon="fluent:briefcase-16-filled" width="12" height="12" style="margin-right: 3px;" />
+                        Career-Ops
+                      </span>
+                      <span v-else-if="item.outreachSource === 'harvey' || item.outreach_source === 'harvey'" class="outreach-email-pill harvey">
+                        <Icon icon="fluent:target-arrow-16-filled" width="12" height="12" style="margin-right: 3px;" />
+                        Harvey
+                      </span>
                       <span class="subject-text">
                         <slot name="subject" :email="item" >
                           <span v-html="item.subjectHtml"></span>
@@ -1421,4 +1429,29 @@ ul {
   margin: 0;
 }
 
+
+.outreach-email-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 2px 7px;
+  border-radius: 4px;
+  margin-right: 6px;
+  vertical-align: middle;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+.outreach-email-pill.career {
+  background: #ede9fe;
+  color: #6d28d9;
+  border: 1px solid #c4b5fd;
+}
+.outreach-email-pill.harvey {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
 </style>

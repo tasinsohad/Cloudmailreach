@@ -479,7 +479,9 @@ const emailService = {
 				sendEmail: accountRow.email,
 				messageId: emailRow.messageId,
 				sendType, useCloudflareEmail, roleRow, r2Domain,
-				imageDataList, attachments
+				imageDataList, attachments,
+				outreachSource: params.outreachSource || '',
+				outreachCampaign: params.outreachCampaign || ''
 			}
 		};
 
@@ -659,7 +661,8 @@ const emailService = {
 		const {
 			accountId, userId, name, subject, text, html, sendEmail, receiveEmail,
 			providerId, messageId, sendType, useCloudflareEmail,
-			roleRow, r2Domain, attachments
+			roleRow, r2Domain, attachments,
+			outreachSource, outreachCampaign
 		} = params;
 		const imageDataList = params.imageDataList.map(item => ({
 			...item, contentId: `<${item.contentId.replace(/^<|>$/g, '')}>`
@@ -675,7 +678,9 @@ const emailService = {
 			status: useCloudflareEmail ? emailConst.status.DELIVERED : emailConst.status.SENT,
 			type: emailConst.type.SEND,
 			resendEmailId: providerId || '',
-			recipient: JSON.stringify(receiveEmail.map(address => ({ address, name: '' })))
+			recipient: JSON.stringify(receiveEmail.map(address => ({ address, name: '' }))),
+			outreachSource: outreachSource || '',
+			outreachCampaign: outreachCampaign || ''
 		};
 		if (sendType === 'reply' && messageId) {
 			emailData.inReplyTo = messageId;

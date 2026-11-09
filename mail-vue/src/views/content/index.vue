@@ -14,6 +14,14 @@
     <el-scrollbar class="scrollbar">
       <div class="container">
         <div class="email-title">
+          <span v-if="email.outreachSource === 'career_ops' || email.outreach_source === 'career_ops'" class="outreach-content-badge career">
+            <Icon icon="fluent:briefcase-16-filled" width="14" height="14" style="margin-right: 4px;" />
+            Career-Ops (Job Hunting)
+          </span>
+          <span v-else-if="email.outreachSource === 'harvey' || email.outreach_source === 'harvey'" class="outreach-content-badge harvey">
+            <Icon icon="fluent:target-arrow-16-filled" width="14" height="14" style="margin-right: 4px;" />
+            Harvey (Client Acquisition)
+          </span>
           {{ email.subject }}
         </div>
         <div class="content">
@@ -550,4 +558,25 @@ const handleDelete = () => {
 }
 
 
+
+.outreach-content-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 6px;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.outreach-content-badge.career {
+  background: #ede9fe;
+  color: #6d28d9;
+  border: 1px solid #c4b5fd;
+}
+.outreach-content-badge.harvey {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
 </style>

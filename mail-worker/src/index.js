@@ -134,6 +134,7 @@ export default {
 							emailBody = generated.body;
 						}
 
+						const isCareerOps = (camp.type === 'job_hunting' || camp.campaign_id === 1);
 						await emailService.send({ env }, {
 							accountId: accountId,
 							receiveEmail: [lead.target_email],
@@ -142,6 +143,8 @@ export default {
 							text: emailBody || '',
 							content: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: #111; line-height: 1.6;">${(emailBody || '').replace(/\n/g, '<br/>')}</div>`,
 							sendType: 'new',
+							outreachSource: isCareerOps ? 'career_ops' : 'harvey',
+							outreachCampaign: isCareerOps ? 'Career-Ops (Jobs)' : 'Harvey (Clients)',
 							attachments: []
 						}, 1);
 
