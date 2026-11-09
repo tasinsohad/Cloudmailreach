@@ -8,7 +8,7 @@ import oauthService from './service/oauth-service';
 import analysisService from './service/analysis-service';
 import dayjs from 'dayjs';
 import kvConst from './const/kv-const';
-import { generateAutonomousEmail } from './api/outreach-api';
+import { generateAutonomousEmail, scoutOpportunities } from './api/outreach-api';
 
 export default {
 	async fetch(req, env, ctx) {
@@ -142,6 +142,25 @@ export default {
 			}
 		} catch (e) {
 			console.error('Error during scheduled outreach drip:', e);
+		}
+
+		// Continuous Auto-Scout: If enabled and queue is low (< 5 leads), autonomously source fresh opportunities!
+		try {
+			const autoScoutEnabled = (await env.kv.get('outreach:autoscout')) === '1';
+			if (autoScoutEnabled) {
+				const queuedRes = await env.db.prepare(
+					`SELECT COUNT(*) as cnt FROM outreach_lead WHERE status = 'queued'`
+				).first();
+				const queuedCount = queuedRes?.cnt || 0;
+				if (queuedCount < 5) {
+					console.log(`[Auto-Scout Cron] Buffer is low (${queuedCount} leads). Sourcing fresh opportunities...`);
+					const fakeC = { env };
+					await scoutOpportunities(fakeC, 'job_hunting', 3);
+					await scoutOpportunities(fakeC, 'service_outreach', 3);
+				}
+			}
+		} catch (scoutErr) {
+			console.error('[Auto-Scout Cron] Error:', scoutErr.message);
 		}
 	},
 };

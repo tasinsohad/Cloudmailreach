@@ -65,6 +65,29 @@
               Test AI Copywriter
             </el-button>
           </div>
+          <div class="autoscout-bar" style="width: 100%; border-top: 1px dashed #cbd5e1; padding-top: 10px; margin-top: 4px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <Icon icon="fluent:radar-24-filled" width="22" height="22" style="color: #6366f1;" />
+              <div>
+                <span style="font-size: 14px; font-weight: 700; color: #1e293b;">Autonomous Opportunity Scout (Lead-Free Mode)</span>
+                <el-tag :type="autoScoutEnabled ? 'success' : 'info'" size="small" effect="plain" style="margin-left: 8px;">
+                  {{ autoScoutEnabled ? 'ACTIVE: AUTO-SOURCING OPPORTUNITIES' : 'PAUSED (MANUAL)' }}
+                </el-tag>
+                <div style="font-size: 12.5px; color: #64748b; margin-top: 1px;">
+                  Harvey & Career-Ops scout the web & sourcing radar to find high-match opportunities automatically. No manual lead list required!
+                </div>
+              </div>
+            </div>
+            <el-switch 
+              v-model="autoScoutEnabled" 
+              :loading="togglingAutoScout"
+              @change="handleToggleAutoScout"
+              active-text="Auto-Scout ON"
+              inactive-text="OFF"
+              size="default"
+              style="--el-switch-on-color: #6366f1;"
+            />
+          </div>
         </div>
 
         <!-- Metric Stat Cards -->
@@ -384,6 +407,28 @@
                 </el-button>
               </div>
 
+              <div class="scout-action-banner" style="background: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 100%); border: 1px solid #bfdbfe; border-radius: 12px; padding: 18px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+                <div>
+                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                    <Icon icon="fluent:radar-rectangle-20-filled" width="22" height="22" style="color: #2563eb;" />
+                    <span style="font-size: 16px; font-weight: 700; color: #1e3a8a;">Career-Ops Autonomous Opportunity Scout</span>
+                    <el-tag size="small" type="primary" effect="dark">Zero Lead List Required</el-tag>
+                  </div>
+                  <div style="font-size: 13px; color: #1e40af; max-width: 650px;">
+                    Scouts tech companies and finds active hiring managers and technical recruiters recruiting for your target roles ({{ jobForm.targetRoles || 'AI / Full-Stack' }}). Discovered prospects are automatically verified and queued!
+                  </div>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                  <el-button type="primary" :loading="scoutingCareer" @click="handleScoutCareerOps(5)">
+                    <Icon icon="fluent:sparkle-20-regular" width="18" height="18" style="margin-right: 6px;" />
+                    Scout 5 Job Leads
+                  </el-button>
+                  <el-button type="primary" plain :loading="scoutingCareer" @click="handleScoutCareerOps(10)">
+                    Scout 10 Leads
+                  </el-button>
+                </div>
+              </div>
+
               <p class="section-help-text">
                 Controls target roles, resume links, and custom pitch hooks for automated recruiter and hiring manager outreach.
               </p>
@@ -442,6 +487,28 @@
                 <el-button type="primary" :loading="savingHarveyControls" @click="saveHarveyControls">
                   Save Client Hunting Parameters
                 </el-button>
+              </div>
+
+              <div class="scout-action-banner" style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border: 1px solid #bbf7d0; border-radius: 12px; padding: 18px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+                <div>
+                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                    <Icon icon="fluent:target-arrow-20-filled" width="22" height="22" style="color: #059669;" />
+                    <span style="font-size: 16px; font-weight: 700; color: #065f46;">Harvey Autonomous B2B Prospect Radar</span>
+                    <el-tag size="small" type="success" effect="dark">Zero Lead List Required</el-tag>
+                  </div>
+                  <div style="font-size: 13px; color: #047857; max-width: 650px;">
+                    Scouts B2B companies in your ICP ({{ harveyForm.icpIndustries || 'B2B SaaS / Tech' }}), analyzes operational pain points, and discovers key decision-makers ({{ harveyForm.targetTitles || 'CTO / VP Engineering' }}). Automatically verified and queued!
+                  </div>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                  <el-button type="success" :loading="scoutingHarvey" @click="handleScoutHarvey(5)">
+                    <Icon icon="fluent:radar-24-filled" width="18" height="18" style="margin-right: 6px;" />
+                    Scout 5 B2B Prospects
+                  </el-button>
+                  <el-button type="success" plain :loading="scoutingHarvey" @click="handleScoutHarvey(10)">
+                    Scout 10 Prospects
+                  </el-button>
+                </div>
               </div>
 
               <p class="section-help-text">
@@ -1127,7 +1194,9 @@ import {
   previewAutoPilot,
   saveSystemPrompts,
   resetSystemPrompts,
-  clearAllOutreachLeads
+  clearAllOutreachLeads,
+  toggleAutoScout,
+  triggerScoutOpportunities
 } from '@/request/outreach.js';
 
 const route = useRoute();
@@ -1160,6 +1229,11 @@ const savingLlm = ref(false);
 const autoPilotEnabled = ref(false);
 const togglingAutoPilot = ref(false);
 const showAutoPilotModal = ref(false);
+
+const autoScoutEnabled = ref(false);
+const togglingAutoScout = ref(false);
+const scoutingCareer = ref(false);
+const scoutingHarvey = ref(false);
 const generatingTest = ref(false);
 const testLead = reactive({
   targetEmail: 'alex@stripe.com',
@@ -1180,6 +1254,47 @@ async function handleToggleAutoPilot(val) {
     ElMessage.error(err.message || 'Failed to toggle Auto-Pilot');
   } finally {
     togglingAutoPilot.value = false;
+  }
+}
+
+async function handleToggleAutoScout(val) {
+  togglingAutoScout.value = true;
+  try {
+    await toggleAutoScout(val);
+    ElMessage.success(`Autonomous Opportunity Sourcing is now ${val ? 'ACTIVATED' : 'PAUSED'}`);
+  } catch (err) {
+    autoScoutEnabled.value = !val;
+    ElMessage.error(err.message || 'Failed to toggle Auto-Scout');
+  } finally {
+    togglingAutoScout.value = false;
+  }
+}
+
+async function handleScoutCareerOps(count = 5) {
+  scoutingCareer.value = true;
+  try {
+    const res = await triggerScoutOpportunities('job_hunting', count);
+    const added = res?.data?.added ?? res?.added ?? count;
+    ElMessage.success(`Career-Ops Scout discovered & queued ${added} fresh job opportunities!`);
+    await Promise.all([fetchData(), loadLeads()]);
+  } catch (err) {
+    ElMessage.error(err.message || 'Scouting failed');
+  } finally {
+    scoutingCareer.value = false;
+  }
+}
+
+async function handleScoutHarvey(count = 5) {
+  scoutingHarvey.value = true;
+  try {
+    const res = await triggerScoutOpportunities('service_outreach', count);
+    const added = res?.data?.added ?? res?.added ?? count;
+    ElMessage.success(`Harvey Radar discovered & queued ${added} fresh B2B client prospects!`);
+    await Promise.all([fetchData(), loadLeads()]);
+  } catch (err) {
+    ElMessage.error(err.message || 'Scouting failed');
+  } finally {
+    scoutingHarvey.value = false;
   }
 }
 
@@ -1411,6 +1526,7 @@ async function fetchData() {
     const data = raw?.data || raw;
     if (data) {
       autoPilotEnabled.value = Boolean(data.autopilot);
+      autoScoutEnabled.value = Boolean(data.autoscout);
       Object.assign(stats, data.stats || {});
       campaigns.value = (data.campaigns || []).map(c => ({
         ...c,

@@ -96,3 +96,12 @@ export function clearAllOutreachLeads() {
     return http.post('/outreach/leads/clear-all');
 }
 
+export function toggleAutoScout(enabled) {
+    return http.post('/outreach/autoscout/toggle', { enabled });
+}
+
+export function triggerScoutOpportunities(type = 'job_hunting', count = 5) {
+    return http.post('/outreach/scout/trigger', { type, count });
+}
+
+

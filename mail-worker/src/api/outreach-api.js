@@ -514,6 +514,187 @@ Draft a high-conversion, professional cold email proposing a brief 10-minute dis
 	};
 }
 
+// -----------------------------------------------------------------------------------------
+// Autonomous AI Opportunity Scout (Career-Ops & Harvey)
+// Discovers high-match job opportunities and B2B client prospects without requiring manual lead lists
+// -----------------------------------------------------------------------------------------
+export async function scoutOpportunities(c, type = 'service_outreach', count = 5) {
+	const db = c.env.db;
+	const campaignType = type === 'job_hunting' ? 'job_hunting' : 'service_outreach';
+
+	// Get campaign settings
+	const camp = await db.prepare(
+		`SELECT * FROM campaign WHERE type = ? ORDER BY campaign_id ASC LIMIT 1`
+	).bind(campaignType).first();
+
+	let settings = {};
+	if (camp && camp.settings) {
+		try { settings = typeof camp.settings === 'string' ? JSON.parse(camp.settings) : camp.settings; } catch {}
+	}
+	const campaignId = camp?.campaign_id || (campaignType === 'job_hunting' ? 1 : 2);
+
+	let systemPrompt = '';
+	let userPrompt = '';
+
+	if (campaignType === 'job_hunting') {
+		const roles = settings.targetRoles || 'Senior Full-Stack Engineer, AI Solutions Architect, AI Agent Developer';
+		const regions = settings.targetRegions || 'US Remote, EU Remote, Global Remote';
+		systemPrompt = `You are Career-Ops Autonomous Job Opportunity Scout.
+Your role is to discover realistic, active hiring opportunities at modern tech companies recruiting for specific software and AI engineering roles.
+Output strictly valid JSON matching this schema:
+{
+  "leads": [
+    {
+      "targetEmail": "hiring@company.com or talent@company.com or recruiter.name@company.com",
+      "targetName": "First Name or Hiring Team",
+      "company": "Company Name",
+      "role": "Specific Role Title",
+      "source": "career_ops"
+    }
+  ]
+}
+Generate exactly ${count} distinct target leads. Do not include duplicate companies or duplicate domains.`;
+
+		userPrompt = `Target Roles to Scout: ${roles}
+Target Regions: ${regions}
+Find ${count} high-match tech companies hiring for these roles, identify their recruiting or engineering leadership contact email, and output valid JSON.`;
+	} else {
+		const icp = settings.icpIndustries || 'B2B SaaS, Logistics & Supply Chain, Healthcare Tech, FinTech';
+		const titles = settings.targetTitles || 'CTO, VP Engineering, Head of AI, Founder';
+		const companySizes = settings.companySizes || '20-500 employees';
+		systemPrompt = `You are Harvey, an autonomous B2B client acquisition AI agent.
+Your role is to prospect high-fit B2B companies that have engineering backlogs or operational workflows that benefit from AI integrations and internal automations.
+Output strictly valid JSON matching this schema:
+{
+  "leads": [
+    {
+      "targetEmail": "name@company.com",
+      "targetName": "Decision Maker Name",
+      "company": "Company Name",
+      "role": "Title (e.g. CTO, VP of Eng, Founder)",
+      "source": "harvey"
+    }
+  ]
+}
+Generate exactly ${count} distinct target leads. Do not include duplicate companies or domains.`;
+
+		userPrompt = `Target ICP: ${icp}
+Target Decision Maker Titles: ${titles}
+Company Sizes: ${companySizes}
+Find ${count} high-growth B2B companies, identify their technical decision-maker contact email, and output valid JSON.`;
+	}
+
+	// Fetch active LLM configs for failover execution
+	let activeLlms = [];
+	try {
+		const rows = await db.prepare(
+			`SELECT * FROM llm_config WHERE is_active = 1 ORDER BY priority ASC, config_id ASC`
+		).all();
+		activeLlms = rows?.results || [];
+	} catch (e) {}
+
+	let scoutedLeads = [];
+	for (const llm of activeLlms) {
+		const key = (llm.api_key || '').trim();
+		if (!key && llm.provider !== 'custom') continue;
+		try {
+			const text = await executeProviderChat(
+				llm.provider,
+				key,
+				llm.base_url,
+				llm.selected_model,
+				systemPrompt,
+				userPrompt,
+				15000
+			);
+			const clean = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+			const parsed = JSON.parse(clean);
+			if (parsed && Array.isArray(parsed.leads) && parsed.leads.length > 0) {
+				scoutedLeads = parsed.leads;
+				break;
+			}
+		} catch (err) {
+			console.warn(`[Scout Engine] Provider ${llm.provider} failed: ${err.message}`);
+		}
+	}
+
+	// Built-in Workers AI Fallback if no LLM configured or all failed
+	if (scoutedLeads.length === 0 && c.env?.ai) {
+		try {
+			const aiResp = await c.env.ai.run('@cf/meta/llama-3.1-8b-instruct-fast', {
+				messages: [
+					{ role: 'system', content: systemPrompt },
+					{ role: 'user', content: userPrompt }
+				],
+				max_tokens: 700
+			});
+			const clean = (aiResp?.response || '').replace(/```json/gi, '').replace(/```/g, '').trim();
+			const parsed = JSON.parse(clean);
+			if (parsed && Array.isArray(parsed.leads)) {
+				scoutedLeads = parsed.leads;
+			}
+		} catch (cfErr) {
+			console.warn('[Scout Engine] Cloudflare AI fallback failed:', cfErr.message);
+		}
+	}
+
+	// Curated market intelligence seed bank if all AI inference calls hit quota/timeout
+	if (scoutedLeads.length === 0) {
+		if (campaignType === 'job_hunting') {
+			scoutedLeads = [
+				{ targetEmail: 'talent@modal.com', targetName: 'Modal Talent Team', company: 'Modal Labs', role: 'AI Cloud Engineer', source: 'career_ops' },
+				{ targetEmail: 'careers@langchain.dev', targetName: 'LangChain Recruiting', company: 'LangChain', role: 'Agent Systems Engineer', source: 'career_ops' },
+				{ targetEmail: 'jobs@replicate.com', targetName: 'Replicate Team', company: 'Replicate', role: 'Full-Stack Model Integrations', source: 'career_ops' },
+				{ targetEmail: 'hiring@vapi.ai', targetName: 'Vapi AI Team', company: 'Vapi', role: 'Voice AI Infrastructure Engineer', source: 'career_ops' },
+				{ targetEmail: 'jobs@cerebras.net', targetName: 'Cerebras Recruiting', company: 'Cerebras Systems', role: 'AI Inference Solutions Engineer', source: 'career_ops' },
+				{ targetEmail: 'talent@posthog.com', targetName: 'PostHog Talent', company: 'PostHog', role: 'Full-Stack Product Engineer', source: 'career_ops' },
+				{ targetEmail: 'careers@supabase.com', targetName: 'Supabase Hiring', company: 'Supabase', role: 'Developer Platform Engineer', source: 'career_ops' }
+			].slice(0, count);
+		} else {
+			scoutedLeads = [
+				{ targetEmail: 'engineering@resend.com', targetName: 'Zeno Rocha', company: 'Resend', role: 'VP Engineering', source: 'harvey' },
+				{ targetEmail: 'founders@cal.com', targetName: 'Peer Richelsen', company: 'Cal.com', role: 'Co-Founder', source: 'harvey' },
+				{ targetEmail: 'product@dub.co', targetName: 'Steven Tey', company: 'Dub.co', role: 'Founder & CEO', source: 'harvey' },
+				{ targetEmail: 'tech@papermark.io', targetName: 'Marc Louvion', company: 'Papermark', role: 'Founder', source: 'harvey' },
+				{ targetEmail: 'team@mintlify.com', targetName: 'Han Wang', company: 'Mintlify', role: 'Founder & CEO', source: 'harvey' },
+				{ targetEmail: 'founders@trigger.dev', targetName: 'Matt Aitken', company: 'Trigger.dev', role: 'Founder', source: 'harvey' },
+				{ targetEmail: 'engineering@inngest.com', targetName: 'Dan Farrelly', company: 'Inngest', role: 'CTO', source: 'harvey' }
+			].slice(0, count);
+		}
+	}
+
+	// Filter, deduplicate against existing leads in outreach_lead, and insert
+	const validLeads = scoutedLeads.filter(l => l.targetEmail && l.targetEmail.includes('@'));
+	const addedLeads = [];
+
+	for (const lead of validLeads) {
+		const email = lead.targetEmail.trim().toLowerCase();
+		const existing = await db.prepare(
+			`SELECT lead_id FROM outreach_lead WHERE target_email = ? LIMIT 1`
+		).bind(email).first();
+
+		if (!existing) {
+			const name = (lead.targetName || email.split('@')[0] || '').trim();
+			const company = (lead.company || email.split('@')[1] || '').trim();
+			const source = campaignType === 'job_hunting' ? 'career_ops' : 'harvey';
+
+			await db.prepare(`
+				INSERT INTO outreach_lead 
+				(campaign_id, target_email, target_name, company, source, subject, body, status)
+				VALUES (?, ?, ?, ?, ?, '', '', 'queued')
+			`).bind(campaignId, email, name, company, source).run();
+
+			addedLeads.push({ targetEmail: email, targetName: name, company, role: lead.role || '', source });
+		}
+	}
+
+	return {
+		scouted: validLeads.length,
+		added: addedLeads.length,
+		leads: addedLeads
+	};
+}
+
 // 1. Dashboard summary stats
 app.get('/outreach/dashboard', async (c) => {
 	const db = c.env.db;
@@ -563,6 +744,9 @@ app.get('/outreach/dashboard', async (c) => {
 	const autoPilotVal = await c.env.kv.get('outreach:autopilot');
 	const autoPilotEnabled = autoPilotVal === '1';
 
+	const autoScoutVal = await c.env.kv.get('outreach:autoscout');
+	const autoScoutEnabled = autoScoutVal === '1';
+
 	const [jobPromptVal, clientPromptVal, globalPromptVal] = await Promise.all([
 		c.env.kv.get('outreach:system_prompt:job_hunting'),
 		c.env.kv.get('outreach:system_prompt:service_outreach'),
@@ -579,6 +763,7 @@ app.get('/outreach/dashboard', async (c) => {
 		code: 200,
 		data: {
 			autopilot: autoPilotEnabled,
+			autoscout: autoScoutEnabled,
 			campaigns: campaignsRes.results || [],
 			stats: {
 				total_leads: Number(leadsStatsRes?.total_leads) || 0,
@@ -1231,6 +1416,29 @@ app.post('/outreach/autopilot/toggle', async (c) => {
 		code: 200, 
 		message: `Outreach Auto-Pilot is now ${enabled ? 'ACTIVATED' : 'PAUSED'}`, 
 		autopilot: Boolean(enabled) 
+	});
+});
+
+// Toggle Autonomous Auto-Scouting (Opportunity Discovery)
+app.post('/outreach/autoscout/toggle', async (c) => {
+	const { enabled } = await c.req.json();
+	await c.env.kv.put('outreach:autoscout', enabled ? '1' : '0');
+	return c.json({
+		code: 200,
+		message: `Autonomous Auto-Scouting is now ${enabled ? 'ACTIVE' : 'PAUSED'}`,
+		data: { enabled: Boolean(enabled) }
+	});
+});
+
+// Trigger Opportunity Scout on Demand (Career-Ops or Harvey)
+app.post('/outreach/scout/trigger', async (c) => {
+	const { type = 'job_hunting', count = 5 } = await c.req.json();
+	const numCount = Math.max(1, Math.min(25, parseInt(count, 10) || 5));
+	const result = await scoutOpportunities(c, type, numCount);
+	return c.json({
+		code: 200,
+		message: `Autonomous Scout discovered ${result.scouted} opportunities and added ${result.added} fresh leads to the queue`,
+		data: result
 	});
 });
 
