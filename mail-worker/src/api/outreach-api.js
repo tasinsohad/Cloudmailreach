@@ -162,6 +162,60 @@ export function getProviderDisplayName(provider) {
 	return map[provider] || provider;
 }
 
+export function getProviderCandidateModels(provider, selectedModel) {
+	const fallbackMap = {
+		openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+		openrouter: [
+			'anthropic/claude-3.5-sonnet',
+			'openai/gpt-4o-mini',
+			'deepseek/deepseek-chat',
+			'meta-llama/llama-3.1-70b-instruct',
+			'google/gemini-flash-1.5'
+		],
+		anthropic: [
+			'claude-3-5-sonnet-20241022',
+			'claude-3-5-haiku-20241022',
+			'claude-3-haiku-20240307',
+			'claude-3-sonnet-20240229'
+		],
+		google: [
+			'gemini-1.5-flash',
+			'gemini-1.5-pro',
+			'gemini-2.0-flash-exp',
+			'gemini-1.5-flash-8b'
+		],
+		nvidia_nim: [
+			'meta/llama-3.1-70b-instruct',
+			'meta/llama-3.1-8b-instruct',
+			'mistralai/mixtral-8x22b-instruct-v0.1',
+			'nvidia/nemotron-4-340b-instruct'
+		],
+		cloudflare_ai: [
+			'@cf/meta/llama-3.1-8b-instruct-fast',
+			'@cf/meta/llama-3.1-70b-instruct',
+			'@cf/mistral/mistral-7b-instruct-v0.2',
+			'@cf/qwen/qwen1.5-14b-chat-awq'
+		],
+		custom: ['llama3:latest', 'mistral:latest', 'custom-model']
+	};
+
+	const fallbacks = fallbackMap[provider] || [];
+	const candidateList = [];
+
+	if (selectedModel && typeof selectedModel === 'string' && selectedModel.trim()) {
+		candidateList.push(selectedModel.trim());
+	}
+
+	for (const fb of fallbacks) {
+		if (!candidateList.includes(fb)) {
+			candidateList.push(fb);
+		}
+	}
+
+	return candidateList.length > 0 ? candidateList : ['default'];
+}
+
+
 export function extractSubjectAndBody(text) {
 	if (!text || typeof text !== 'string') return null;
 	const clean = text.replace(/```json/gi, '').replace(/```/g, '').trim();
@@ -434,10 +488,13 @@ Draft a high-conversion, professional cold email proposing a brief 10-minute dis
 		console.error('[Failover Engine] Could not load llm_config:', dbErr.message);
 	}
 
-	// Sequential Failover Execution Loop
+	// Sequential Two-Tier Failover Execution Loop:
+	// Tier 1: Try candidate models from the same API provider
+	// Tier 2: If all models for that provider fail, switch to the next active provider in the failover chain
+	let generationSucceeded = false;
+
 	for (const llm of activeLlms) {
 		const pName = getProviderDisplayName(llm.provider);
-		const mName = llm.selected_model || 'default';
 		const key = (llm.api_key || '').trim();
 
 		// Skip if non-custom provider has no API key
@@ -445,68 +502,88 @@ Draft a high-conversion, professional cold email proposing a brief 10-minute dis
 			continue;
 		}
 
-		try {
-			console.log(`[Failover Engine] Attempting generation with ${pName} (${mName})...`);
-			const startTime = Date.now();
-			const text = await executeProviderChat(
-				llm.provider,
-				key,
-				llm.base_url,
-				llm.selected_model,
-				systemPrompt,
-				userPrompt,
-				12000
-			);
-			const duration = Date.now() - startTime;
-			const extracted = extractSubjectAndBody(text);
+		// Retrieve candidate models: user's selected_model FIRST, followed by fallbacks for this same API
+		const candidateModels = getProviderCandidateModels(llm.provider, llm.selected_model);
 
-			if (extracted) {
-				parsed = extracted;
-				activeProvider = pName;
-				activeModel = mName;
-				console.log(`[Failover Engine] Succeeded with ${pName} (${mName}) in ${duration}ms`);
-				break; // Success! Terminate failover loop
-			} else {
-				throw new Error('Provider response could not be parsed into valid subject & body JSON');
+		for (const mName of candidateModels) {
+			try {
+				console.log(`[Failover Engine] Attempting generation with ${pName} -> model "${mName}"...`);
+				const startTime = Date.now();
+				const text = await executeProviderChat(
+					llm.provider,
+					key,
+					llm.base_url,
+					mName,
+					systemPrompt,
+					userPrompt,
+					12000
+				);
+				const duration = Date.now() - startTime;
+				const extracted = extractSubjectAndBody(text);
+
+				if (extracted) {
+					parsed = extracted;
+					activeProvider = pName;
+					activeModel = mName;
+					generationSucceeded = true;
+					console.log(`[Failover Engine] Succeeded with ${pName} (model: ${mName}) in ${duration}ms`);
+					break; // Success! Break model loop
+				} else {
+					throw new Error('Provider response could not be parsed into valid subject & body JSON');
+				}
+			} catch (err) {
+				console.warn(`[Failover Engine] Model "${mName}" on ${pName} failed: ${err.message}. Trying next candidate model on same API...`);
+				failoverChain.push({
+					provider: pName,
+					model: mName,
+					error: err.message || 'Request failed'
+				});
 			}
-		} catch (err) {
-			console.warn(`[Failover Engine] Provider ${pName} failed: ${err.message}. Switching to next provider in failover chain...`);
-			failoverChain.push({
-				provider: pName,
-				model: mName,
-				error: err.message || 'Request failed'
-			});
+		}
+
+		if (generationSucceeded) {
+			break; // Succeeded! Terminate provider failover loop
+		} else {
+			console.warn(`[Failover Engine] All candidate models exhausted for ${pName}. Switching to next provider in failover pool...`);
 		}
 	}
 
-	// Fallback to Cloudflare Workers AI if all user providers failed or none active
+	// Fallback to Cloudflare Workers AI with internal model fallback
 	if (!parsed && c.env.ai) {
-		try {
-			console.log('[Failover Engine] Triggering Cloudflare Workers AI fallback...');
-			const cfStartTime = Date.now();
-			const cfResult = await c.env.ai.run('@cf/meta/llama-3.1-8b-instruct-fast', {
-				messages: [
-					{ role: 'system', content: systemPrompt },
-					{ role: 'user', content: userPrompt + '\n\nOutput only valid JSON with "subject" and "body" keys.' }
-				],
-				temperature: 0.6,
-				max_tokens: 350
-			});
-			const cfDuration = Date.now() - cfStartTime;
-			const cfText = typeof cfResult === 'string' ? cfResult : cfResult?.response || '';
-			parsed = extractSubjectAndBody(cfText);
-			if (parsed) {
-				activeProvider = 'Cloudflare Workers AI';
-				activeModel = '@cf/meta/llama-3.1-8b-instruct-fast';
-				console.log(`[Failover Engine] Succeeded with Cloudflare Workers AI in ${cfDuration}ms`);
+		const cfModels = [
+			'@cf/meta/llama-3.1-8b-instruct-fast',
+			'@cf/meta/llama-3.1-70b-instruct',
+			'@cf/mistral/mistral-7b-instruct-v0.2'
+		];
+		for (const cfModel of cfModels) {
+			try {
+				console.log(`[Failover Engine] Triggering Cloudflare Workers AI fallback with model "${cfModel}"...`);
+				const cfStartTime = Date.now();
+				const cfResult = await c.env.ai.run(cfModel, {
+					messages: [
+						{ role: 'system', content: systemPrompt },
+						{ role: 'user', content: userPrompt + '\n\nOutput only valid JSON with "subject" and "body" keys.' }
+					],
+					temperature: 0.6,
+					max_tokens: 350
+				});
+				const cfDuration = Date.now() - cfStartTime;
+				const cfText = typeof cfResult === 'string' ? cfResult : cfResult?.response || '';
+				parsed = extractSubjectAndBody(cfText);
+				if (parsed) {
+					activeProvider = 'Cloudflare Workers AI';
+					activeModel = cfModel;
+					console.log(`[Failover Engine] Succeeded with Cloudflare Workers AI (${cfModel}) in ${cfDuration}ms`);
+					break;
+				}
+			} catch (aiErr) {
+				console.error(`[Failover Engine] Cloudflare AI model "${cfModel}" error:`, aiErr.message);
+				failoverChain.push({
+					provider: 'Cloudflare Workers AI',
+					model: cfModel,
+					error: aiErr.message
+				});
 			}
-		} catch (aiErr) {
-			console.error('[Failover Engine] Cloudflare AI fallback error:', aiErr.message);
-			failoverChain.push({
-				provider: 'Cloudflare Workers AI',
-				model: '@cf/meta/llama-3.1-8b-instruct-fast',
-				error: aiErr.message
-			});
 		}
 	}
 
@@ -617,44 +694,61 @@ Perform an exhaustive B2B market discovery scan. Find up to ${count} high-growth
 	for (const llm of activeLlms) {
 		const key = (llm.api_key || '').trim();
 		if (!key && llm.provider !== 'custom') continue;
-		try {
-			const text = await executeProviderChat(
-				llm.provider,
-				key,
-				llm.base_url,
-				llm.selected_model,
-				systemPrompt,
-				userPrompt,
-				18000
-			);
-			const clean = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-			const parsed = JSON.parse(clean);
-			if (parsed && Array.isArray(parsed.leads) && parsed.leads.length > 0) {
-				scoutedLeads = parsed.leads;
-				break;
+
+		const candidateModels = getProviderCandidateModels(llm.provider, llm.selected_model);
+
+		for (const mName of candidateModels) {
+			try {
+				const text = await executeProviderChat(
+					llm.provider,
+					key,
+					llm.base_url,
+					mName,
+					systemPrompt,
+					userPrompt,
+					18000
+				);
+				const clean = (text || '').replace(new RegExp('```json', 'gi'), '').replace(new RegExp('```', 'g'), '').trim();
+				const parsed = JSON.parse(clean);
+				if (parsed && Array.isArray(parsed.leads) && parsed.leads.length > 0) {
+					scoutedLeads = parsed.leads;
+					break; // model loop
+				}
+			} catch (err) {
+				console.warn(`[Deep Scout Engine] Model "${mName}" on ${llm.provider} failed: ${err.message}. Trying next candidate model...`);
 			}
-		} catch (err) {
-			console.warn(`[Deep Scout Engine] Provider ${llm.provider} failed: ${err.message}`);
+		}
+
+		if (scoutedLeads.length > 0) {
+			break; // provider loop
 		}
 	}
 
-	// Built-in Workers AI Fallback
+	// Built-in Workers AI Fallback with multiple models
 	if (scoutedLeads.length === 0 && c.env?.ai) {
-		try {
-			const aiResp = await c.env.ai.run('@cf/meta/llama-3.1-8b-instruct-fast', {
-				messages: [
-					{ role: 'system', content: systemPrompt },
-					{ role: 'user', content: userPrompt }
-				],
-				max_tokens: 1200
-			});
-			const clean = (aiResp?.response || '').replace(/```json/gi, '').replace(/```/g, '').trim();
-			const parsed = JSON.parse(clean);
-			if (parsed && Array.isArray(parsed.leads)) {
-				scoutedLeads = parsed.leads;
+		const cfModels = [
+			'@cf/meta/llama-3.1-8b-instruct-fast',
+			'@cf/meta/llama-3.1-70b-instruct',
+			'@cf/mistral/mistral-7b-instruct-v0.2'
+		];
+		for (const cfModel of cfModels) {
+			try {
+				const aiResp = await c.env.ai.run(cfModel, {
+					messages: [
+						{ role: 'system', content: systemPrompt },
+						{ role: 'user', content: userPrompt }
+					],
+					max_tokens: 1200
+				});
+				const clean = ((aiResp?.response) || '').replace(new RegExp('```json', 'gi'), '').replace(new RegExp('```', 'g'), '').trim();
+				const parsed = JSON.parse(clean);
+				if (parsed && Array.isArray(parsed.leads) && parsed.leads.length > 0) {
+					scoutedLeads = parsed.leads;
+					break;
+				}
+			} catch (cfErr) {
+				console.warn(`[Deep Scout Engine] Cloudflare AI model "${cfModel}" fallback failed:`, cfErr.message);
 			}
-		} catch (cfErr) {
-			console.warn('[Deep Scout Engine] Cloudflare AI fallback failed:', cfErr.message);
 		}
 	}
 
@@ -1763,104 +1857,66 @@ app.post('/outreach/llm/test-provider', async (c) => {
 		});
 	}
 
-	const startTime = Date.now();
-	try {
-		const result = await executeProviderChat(
-			provider,
-			key,
-			base,
-			model,
-			'You are a status verification bot. Answer with valid JSON: {"status": "ok", "message": "Connection verified successfully"}',
-			'Verify connectivity and response time in valid JSON.',
-			10000
-		);
-		const latency = Date.now() - startTime;
-		return c.json({
-			code: 200,
-			success: true,
-			latencyMs: latency,
-			message: `Connected successfully (${latency}ms latency)!`,
-			preview: (result || '').slice(0, 150),
-			data: {
+	const candidateModels = getProviderCandidateModels(provider, model);
+	let lastError = null;
+	let primaryModelError = null;
+
+	for (const candidate of candidateModels) {
+		const startTime = Date.now();
+		try {
+			const result = await executeProviderChat(
+				provider,
+				key,
+				base,
+				candidate,
+				'You are a status verification bot. Answer with valid JSON: {"status": "ok", "message": "Connection verified successfully"}',
+				'Verify connectivity and response time in valid JSON.',
+				10000
+			);
+			const latency = Date.now() - startTime;
+			const isFallback = Boolean(model && candidate !== model);
+			const message = isFallback 
+				? `Connected with fallback model "${candidate}" (${latency}ms latency)! Note: Primary model "${model}" failed.`
+				: `Connected successfully with ${candidate} (${latency}ms latency)!`;
+
+			return c.json({
+				code: 200,
 				success: true,
 				latencyMs: latency,
-				message: `Connected successfully (${latency}ms latency)!`,
-				preview: (result || '').slice(0, 150)
+				modelUsed: candidate,
+				isFallback,
+				message,
+				preview: (result || '').slice(0, 150),
+				data: {
+					success: true,
+					latencyMs: latency,
+					modelUsed: candidate,
+					isFallback,
+					message,
+					preview: (result || '').slice(0, 150)
+				}
+			});
+		} catch (err) {
+			const latency = Date.now() - startTime;
+			if (!primaryModelError && model && candidate === model) {
+				primaryModelError = err.message;
 			}
-		});
-	} catch (err) {
-		const latency = Date.now() - startTime;
-		return c.json({
-			code: 200,
-			success: false,
-			latencyMs: latency,
-			error: err.message || 'Connection test failed',
-			data: {
-				success: false,
-				latencyMs: latency,
-				error: err.message || 'Connection test failed'
-			}
-		});
+			lastError = err;
+			console.warn(`[Test Provider] Model "${candidate}" failed for ${provider}: ${err.message}. Trying next candidate model...`);
+		}
 	}
-});
 
-// 12e. Save Custom AI System Prompts
-app.post('/outreach/system-prompts/save', async (c) => {
-	const { job_hunting, service_outreach, global } = await c.req.json();
-	if (job_hunting !== undefined) {
-		await c.env.kv.put('outreach:system_prompt:job_hunting', (job_hunting || '').trim());
-	}
-	if (service_outreach !== undefined) {
-		await c.env.kv.put('outreach:system_prompt:service_outreach', (service_outreach || '').trim());
-	}
-	if (global !== undefined) {
-		await c.env.kv.put('outreach:system_prompt:global', (global || '').trim());
-	}
 	return c.json({
 		code: 200,
-		message: 'AI system prompts saved successfully',
-		data: { job_hunting, service_outreach, global }
-	});
-});
-
-// 12f. Reset System Prompts to High-Converting Defaults
-app.post('/outreach/system-prompts/reset', async (c) => {
-	const { type } = await c.req.json();
-	if (type === 'job_hunting' || type === 'all') {
-		await c.env.kv.delete('outreach:system_prompt:job_hunting');
-	}
-	if (type === 'service_outreach' || type === 'all') {
-		await c.env.kv.delete('outreach:system_prompt:service_outreach');
-	}
-	if (type === 'global' || type === 'all') {
-		await c.env.kv.delete('outreach:system_prompt:global');
-	}
-	return c.json({
-		code: 200,
-		message: 'System prompts reset to default',
+		success: false,
+		error: lastError?.message || 'Connection test failed across all candidate models for this provider',
 		data: {
-			job_hunting: `You are an elite, natural human outreach AI representing Tasin Sohad for engineering & AI roles. Write a compelling, concise (under 80 words), high-converting cold email to a tech recruiter or hiring manager. Never sound like a generic template. Format response ONLY as valid JSON: {"subject": "...", "body": "..."}`,
-			service_outreach: `You are Harvey, an autonomous B2B client acquisition AI for Tasin Sohad. Write a tailored, executive-level cold outreach email (under 75 words) that solves an engineering backlog problem. Avoid spammy sales fluff. Format response ONLY as valid JSON: {"subject": "...", "body": "..."}`,
-			global: ''
+			success: false,
+			error: lastError?.message || 'Connection test failed across all candidate models for this provider'
 		}
 	});
 });
 
-// 13. Update Telegram settings
-app.post('/outreach/telegram/update', async (c) => {
-	const { tgBotToken, tgChatId } = await c.req.json();
-
-	await c.env.db.prepare(`
-		UPDATE setting 
-		SET tg_bot_token = ?, tg_chat_id = ?, tg_bot_status = 1
-	`).bind((tgBotToken || '').trim(), (tgChatId || '').trim()).run();
-
-	await settingService.refresh(c);
-
-	return c.json({ code: 200, message: 'Telegram settings updated successfully' });
-});
-
-// 14. Test Telegram notification
 app.post('/outreach/telegram/test', async (c) => {
 	const { tgBotToken, tgChatId } = await c.req.json();
 

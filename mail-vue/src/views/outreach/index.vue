@@ -661,7 +661,7 @@
                     <span class="failover-title">Active Failover Sequence & Auto-Switching Pool</span>
                   </div>
                   <span class="failover-subtitle">
-                    Add keys from multiple providers below. Harvey attempts Priority #1 first; if any API key hits rate limits (429), quota limits, or server timeout, it automatically switches to the next active provider in real time.
+                    Configure your API keys below. The engine attempts your selected model on Priority #1 first. If that model encounters rate limits (429), errors, or timeout, it automatically tries fallback models from the same API key. If all models on that provider fail, it seamlessly switches to your next active provider in real time.
                   </span>
                 </div>
 
