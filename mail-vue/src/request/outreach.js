@@ -104,4 +104,13 @@ export function triggerScoutOpportunities(type = 'job_hunting', count = 5) {
     return http.post('/outreach/scout/trigger', { type, count });
 }
 
+export function toggleAutoMode(data) {
+    return http.post('/outreach/automode/toggle', data);
+}
+
+export function runAutoModeCycleNow(options = {}) {
+    return http.post('/outreach/automode/run-now', options);
+}
+
+
 

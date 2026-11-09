@@ -90,6 +90,74 @@
           </div>
         </div>
 
+        <!-- FULL AUTONOMOUS AUTO MODE MASTER SUITE -->
+        <div class="automode-master-card" :class="{ 'is-automode-active': autoModeEnabled }">
+          <div class="automode-main-row">
+            <div class="automode-left">
+              <div class="automode-pulse-icon">
+                <Icon :icon="autoModeEnabled ? 'fluent:sparkle-28-filled' : 'fluent:sparkle-28-regular'" width="28" height="28" />
+              </div>
+              <div class="automode-info">
+                <div class="automode-title-row">
+                  <span class="automode-title">Full Autonomous Auto Mode</span>
+                  <el-tag :type="autoModeEnabled ? 'success' : 'info'" effect="dark" round size="small">
+                    {{ autoModeEnabled ? 'ACTIVE: SCOUTING & OUTREACHING ON SCHEDULE' : 'STANDBY (MANUAL DISPATCH)' }}
+                  </el-tag>
+                </div>
+                <div class="automode-desc">
+                  {{ autoModeEnabled 
+                    ? 'Autonomous hands-free loop is RUNNING. It checks for new job & client opportunities periodically, drafts personalized cold emails with AI, and sends them across 20 inboxes rotating through 4 domains.'
+                    : 'Turn on Auto Mode to let Harvey and Career-Ops autonomously discover new opportunities from time to time, generate tailored pitches, and dispatch emails on autopilot.'
+                  }}
+                </div>
+                <div class="automode-badges" v-if="autoModeEnabled">
+                  <span class="auto-badge">
+                    <Icon icon="fluent:clock-16-regular" width="14" height="14" />
+                    Cadence: Every {{ autoModeConfig.intervalMinutes || 30 }} mins
+                  </span>
+                  <span class="auto-badge">
+                    <Icon icon="fluent:target-16-regular" width="14" height="14" />
+                    Target: {{ autoModeConfig.target === 'both' ? 'Jobs (Career-Ops) + Clients (Harvey)' : (autoModeConfig.target === 'jobs' ? 'Jobs Only' : 'Clients Only') }}
+                  </span>
+                  <span class="auto-badge" v-if="autoModeLastRun">
+                    <Icon icon="fluent:checkmark-circle-16-regular" width="14" height="14" />
+                    Last Run: {{ autoModeLastRun.dispatched || 0 }} sent, {{ (autoModeLastRun.jobsDiscovered || 0) + (autoModeLastRun.clientsDiscovered || 0) }} sourced
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="automode-right">
+              <el-switch 
+                v-model="autoModeEnabled" 
+                :loading="togglingAutoMode"
+                @change="handleToggleAutoMode"
+                active-text="Auto Mode ON"
+                inactive-text="OFF"
+                size="large"
+                style="--el-switch-on-color: #10b981;"
+              />
+              <div class="automode-btns">
+                <el-button 
+                  type="success" 
+                  size="small" 
+                  :loading="runningAutoCycle" 
+                  @click="handleRunAutoCycleNow"
+                >
+                  <Icon icon="fluent:play-16-filled" width="16" height="16" style="margin-right: 4px;" />
+                  Run Auto Cycle Now
+                </el-button>
+                <el-button 
+                  size="small" 
+                  @click="showAutoModeSettingsModal = true"
+                >
+                  <Icon icon="fluent:settings-16-regular" width="16" height="16" style="margin-right: 4px;" />
+                  Cadence Settings
+                </el-button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Metric Stat Cards -->
         <div class="stats-grid">
           <div class="stat-card">
@@ -1163,6 +1231,42 @@
       </div>
     </el-dialog>
 
+    <!-- Dialog: Auto Mode Cadence & Target Settings -->
+    <el-dialog v-model="showAutoModeSettingsModal" title="Full Autonomous Auto Mode Settings" width="500px">
+      <div style="font-size: 13.5px; color: #64748b; margin-bottom: 16px; line-height: 1.5;">
+        Configure how frequently the autonomous loop checks for fresh opportunities, generates emails, and dispatches them across your 20 inboxes.
+      </div>
+      <el-form label-position="top">
+        <el-form-item label="Checking & Outreach Interval">
+          <el-select v-model="autoModeConfig.intervalMinutes" style="width: 100%;">
+            <el-option :value="15" label="Every 15 Minutes (High Cadence)" />
+            <el-option :value="30" label="Every 30 Minutes (Recommended Deliverability)" />
+            <el-option :value="60" label="Every 1 Hour (Standard Drip)" />
+            <el-option :value="120" label="Every 2 Hours" />
+            <el-option :value="360" label="Every 6 Hours" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Target Opportunities to Scout & Outreach">
+          <el-select v-model="autoModeConfig.target" style="width: 100%;">
+            <el-option value="both" label="Both: Job Opportunities (Career-Ops) + B2B Clients (Harvey)" />
+            <el-option value="jobs" label="Career-Ops (Job Hunting Opportunities Only)" />
+            <el-option value="clients" label="Harvey (B2B Client Prospects Only)" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Batch Size Per Cycle">
+          <el-select v-model="autoModeConfig.batchSize" style="width: 100%;">
+            <el-option :value="3" label="3 Emails per Cycle (Conservative Warmup)" />
+            <el-option :value="5" label="5 Emails per Cycle (Standard Balanced)" />
+            <el-option :value="10" label="10 Emails per Cycle (Maximum Volume)" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showAutoModeSettingsModal = false">Cancel</el-button>
+        <el-button type="primary" @click="handleSaveAutoModeSettings">Save Settings</el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
 
@@ -1196,7 +1300,9 @@ import {
   resetSystemPrompts,
   clearAllOutreachLeads,
   toggleAutoScout,
-  triggerScoutOpportunities
+  triggerScoutOpportunities,
+  toggleAutoMode,
+  runAutoModeCycleNow
 } from '@/request/outreach.js';
 
 const route = useRoute();
@@ -1234,6 +1340,17 @@ const autoScoutEnabled = ref(false);
 const togglingAutoScout = ref(false);
 const scoutingCareer = ref(false);
 const scoutingHarvey = ref(false);
+
+const autoModeEnabled = ref(false);
+const togglingAutoMode = ref(false);
+const runningAutoCycle = ref(false);
+const autoModeConfig = reactive({
+  intervalMinutes: 30,
+  target: 'both',
+  batchSize: 5
+});
+const autoModeLastRun = ref(null);
+const showAutoModeSettingsModal = ref(false);
 const generatingTest = ref(false);
 const testLead = reactive({
   targetEmail: 'alex@stripe.com',
@@ -1295,6 +1412,49 @@ async function handleScoutHarvey(count = 5) {
     ElMessage.error(err.message || 'Scouting failed');
   } finally {
     scoutingHarvey.value = false;
+  }
+}
+
+async function handleToggleAutoMode(val) {
+  togglingAutoMode.value = true;
+  try {
+    await toggleAutoMode({ enabled: val, config: autoModeConfig });
+    autoModeEnabled.value = val;
+    if (val) {
+      autoPilotEnabled.value = true;
+      autoScoutEnabled.value = true;
+    }
+    ElMessage.success(`Full Autonomous Auto Mode is now ${val ? 'ACTIVATED' : 'PAUSED'}`);
+  } catch (err) {
+    autoModeEnabled.value = !val;
+    ElMessage.error(err.message || 'Failed to toggle Auto Mode');
+  } finally {
+    togglingAutoMode.value = false;
+  }
+}
+
+async function handleSaveAutoModeSettings() {
+  try {
+    await toggleAutoMode({ enabled: autoModeEnabled.value, config: autoModeConfig });
+    ElMessage.success('Auto Mode settings updated successfully');
+    showAutoModeSettingsModal.value = false;
+  } catch (err) {
+    ElMessage.error(err.message || 'Failed to update Auto Mode settings');
+  }
+}
+
+async function handleRunAutoCycleNow() {
+  runningAutoCycle.value = true;
+  try {
+    const res = await runAutoModeCycleNow({ target: autoModeConfig.target, batchSize: autoModeConfig.batchSize });
+    const report = res?.data || res;
+    autoModeLastRun.value = report;
+    ElMessage.success(report?.message || 'Autonomous cycle completed successfully!');
+    await Promise.all([fetchData(), loadLeads()]);
+  } catch (err) {
+    ElMessage.error(err.message || 'Auto cycle failed');
+  } finally {
+    runningAutoCycle.value = false;
   }
 }
 
@@ -1527,6 +1687,11 @@ async function fetchData() {
     if (data) {
       autoPilotEnabled.value = Boolean(data.autopilot);
       autoScoutEnabled.value = Boolean(data.autoscout);
+      if (data.automode) {
+        autoModeEnabled.value = Boolean(data.automode.enabled);
+        Object.assign(autoModeConfig, data.automode.config || {});
+        autoModeLastRun.value = data.automode.lastRun;
+      }
       Object.assign(stats, data.stats || {});
       campaigns.value = (data.campaigns || []).map(c => ({
         ...c,
@@ -1983,6 +2148,107 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.automode-master-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 18px 22px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+  transition: all 0.25s ease;
+}
+
+.automode-master-card.is-automode-active {
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+  border-color: #86efac;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.12);
+}
+
+.automode-main-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.automode-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  max-width: 780px;
+}
+
+.automode-pulse-icon {
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  border-radius: 12px;
+  background: #f1f5f9;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+}
+
+.is-automode-active .automode-pulse-icon {
+  background: #dcfce7;
+  color: #059669;
+}
+
+.automode-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.automode-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.automode-desc {
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.45;
+}
+
+.automode-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.auto-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #047857;
+  background: #d1fae5;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.automode-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.automode-btns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .outreach-page {
   height: 100%;
   background: #f7f9fc;
@@ -3069,6 +3335,49 @@ onMounted(async () => {
     padding: 9px 8px;
     font-size: 12.5px;
     height: auto;
+  }
+
+  /* Full Auto Mode Card Mobile */
+  .automode-main-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .automode-left {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .automode-pulse-icon {
+    width: 42px;
+    height: 42px;
+    min-width: 42px;
+    border-radius: 10px;
+  }
+
+  .automode-right {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    border-top: 1px dashed #cbd5e1;
+    padding-top: 12px;
+    margin-top: 4px;
+    gap: 10px;
+  }
+
+  .automode-btns {
+    width: 100%;
+    display: flex;
+    gap: 8px;
+  }
+
+  .automode-btns .el-button {
+    flex: 1;
+    justify-content: center;
+    margin-left: 0 !important;
   }
 
   /* Autonomous Auto-Pilot Banner */

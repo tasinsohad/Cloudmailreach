@@ -8,7 +8,7 @@ import oauthService from './service/oauth-service';
 import analysisService from './service/analysis-service';
 import dayjs from 'dayjs';
 import kvConst from './const/kv-const';
-import { generateAutonomousEmail, scoutOpportunities } from './api/outreach-api';
+import { generateAutonomousEmail, scoutOpportunities, executeFullAutoOutreachCycle } from './api/outreach-api';
 
 export default {
 	async fetch(req, env, ctx) {
@@ -54,11 +54,17 @@ export default {
 		await analysisService.refreshEchartsCache({ env });
 		await oauthService.clearNoBindOathUser({ env });
 
-		// Automated cold outreach dispatching (conserves CF free quota with small batched hourly drip)
+		// Full Autonomous Auto Mode / Periodic Opportunity Sourcing & Outreach
 		try {
-			const activeCampaigns = await env.db.prepare(`
-				SELECT * FROM campaign WHERE status = 1
-			`).all();
+			const autoModeVal = await env.kv.get('outreach:automode:enabled');
+			if (autoModeVal === '1') {
+				console.log('[Auto Mode Cron] Full Autonomous Auto Mode is ACTIVE. Running cycle...');
+				await executeFullAutoOutreachCycle({ env });
+			} else {
+				// Standard drip fallback if any campaign is manually set to Active
+				const activeCampaigns = await env.db.prepare(`
+					SELECT * FROM campaign WHERE status = 1
+				`).all();
 
 			for (const camp of (activeCampaigns.results || [])) {
 				const batchSize = Math.max(1, Math.min(5, Math.ceil(camp.daily_limit / 8)));
@@ -140,8 +146,9 @@ export default {
 					}
 				}
 			}
+			}
 		} catch (e) {
-			console.error('Error during scheduled outreach drip:', e);
+			console.error('Error during scheduled outreach drip / auto mode:', e);
 		}
 
 		// Continuous Auto-Scout: If enabled and queue is low (< 5 leads), autonomously source fresh opportunities!

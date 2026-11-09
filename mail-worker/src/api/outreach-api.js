@@ -694,6 +694,153 @@ Find ${count} high-growth B2B companies, identify their technical decision-maker
 		leads: addedLeads
 	};
 }
+// -----------------------------------------------------------------------------------------
+// Full Autonomous Auto Mode Orchestration Engine
+// Autonomously discovers jobs/clients from time to time, generates AI copy & dispatches
+// -----------------------------------------------------------------------------------------
+export async function executeFullAutoOutreachCycle(c, options = {}) {
+	const env = c.env;
+	const db = env.db;
+	const report = {
+		timestamp: new Date().toISOString(),
+		jobsDiscovered: 0,
+		clientsDiscovered: 0,
+		dispatched: 0,
+		errors: []
+	};
+
+	let config = {
+		enabled: true,
+		intervalMinutes: 30,
+		target: 'both',
+		batchSize: 5
+	};
+	try {
+		const rawConfig = await env.kv.get('outreach:automode:config');
+		if (rawConfig) {
+			config = { ...config, ...JSON.parse(rawConfig) };
+		}
+	} catch (e) {}
+
+	const targetMode = options.target || config.target || 'both';
+	const batchSize = Math.max(1, Math.min(15, options.batchSize || config.batchSize || 5));
+
+	// 1. Autonomous Opportunity Discovery: replenish buffer if low
+	try {
+		if (targetMode === 'both' || targetMode === 'jobs') {
+			const queuedJobsRes = await db.prepare(
+				`SELECT COUNT(*) as cnt FROM outreach_lead WHERE status = 'queued' AND campaign_id = 1`
+			).first();
+			if ((queuedJobsRes?.cnt || 0) < 5) {
+				const scoutRes = await scoutOpportunities(c, 'job_hunting', 4);
+				report.jobsDiscovered = scoutRes.added || 0;
+			}
+		}
+
+		if (targetMode === 'both' || targetMode === 'clients') {
+			const queuedClientsRes = await db.prepare(
+				`SELECT COUNT(*) as cnt FROM outreach_lead WHERE status = 'queued' AND campaign_id = 2`
+			).first();
+			if ((queuedClientsRes?.cnt || 0) < 5) {
+				const scoutRes = await scoutOpportunities(c, 'service_outreach', 4);
+				report.clientsDiscovered = scoutRes.added || 0;
+			}
+		}
+	} catch (scoutErr) {
+		report.errors.push(`Scouting: ${scoutErr.message}`);
+	}
+
+	// 2. Autonomous AI Personalization & Send
+	try {
+		const leadsRes = await db.prepare(`
+			SELECT * FROM outreach_lead 
+			WHERE status = 'queued' 
+			ORDER BY lead_id ASC LIMIT ?
+		`).bind(batchSize).all();
+
+		const leads = leadsRes.results || [];
+		if (leads.length > 0) {
+			const dateStr = dayjs().format('YYYY-MM-DD');
+			const accountsRes = await db.prepare(`
+				SELECT account_id, email, name, daily_send_limit FROM account WHERE is_del = 0 ORDER BY sort ASC
+			`).all();
+			const allAccounts = accountsRes.results || [];
+
+			const eligibleAccounts = [];
+			for (const acc of allAccounts) {
+				const accId = acc.account_id || acc.accountId;
+				const accountDailyKey = kvConst.SEND_DAY_COUNT + 'account:' + accId + ':' + dateStr;
+				const sentToday = Number(await env.kv.get(accountDailyKey) || 0);
+				const limit = acc.daily_send_limit ?? 30;
+				if (sentToday < limit) {
+					eligibleAccounts.push({ ...acc, accountId: accId, sentToday, limit });
+				}
+			}
+
+			if (eligibleAccounts.length > 0) {
+				let accountIndex = 0;
+				for (const lead of leads) {
+					let sender = null;
+					for (let i = 0; i < eligibleAccounts.length; i++) {
+						const candidate = eligibleAccounts[accountIndex % eligibleAccounts.length];
+						accountIndex++;
+						if (candidate.sentToday < candidate.limit) {
+							sender = candidate;
+							break;
+						}
+					}
+					if (!sender) break;
+
+					try {
+						const campRow = await db.prepare(
+							`SELECT type, settings FROM campaign WHERE campaign_id = ?`
+						).bind(lead.campaign_id).first();
+						let settingsObj = {};
+						try { settingsObj = JSON.parse(campRow?.settings || '{}'); } catch {}
+
+						const generated = await generateAutonomousEmail(c, lead, settingsObj, campRow?.type || 'service_outreach');
+						const emailSubject = generated.subject;
+						const emailBody = generated.body;
+
+						await emailService.send(c, {
+							accountId: sender.accountId,
+							receiveEmail: [lead.target_email],
+							name: 'Tasin Sohad',
+							subject: emailSubject,
+							text: emailBody || '',
+							content: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: #111; line-height: 1.6;">${(emailBody || '').replace(/\n/g, '<br/>')}</div>`,
+							sendType: 'new',
+							attachments: []
+						}, 1);
+
+						sender.sentToday++;
+						await db.prepare(`
+							UPDATE outreach_lead 
+							SET status = 'sent', subject = ?, body = ?, sender_email = ?, sent_time = CURRENT_TIMESTAMP 
+							WHERE lead_id = ?
+						`).bind(emailSubject, emailBody, sender.email, lead.lead_id).run();
+
+						report.dispatched++;
+					} catch (sendErr) {
+						report.errors.push(`Send to ${lead.target_email}: ${sendErr.message}`);
+					}
+				}
+			}
+		}
+	} catch (dispatchErr) {
+		report.errors.push(`Dispatch: ${dispatchErr.message}`);
+	}
+
+	report.status = report.errors.length === 0 ? 'success' : (report.dispatched > 0 ? 'partial' : 'failed');
+	report.message = `Auto Cycle: Discovered ${report.jobsDiscovered} jobs, ${report.clientsDiscovered} clients. Dispatched ${report.dispatched} emails.`;
+
+	try {
+		await env.kv.put('outreach:automode:last_run', JSON.stringify(report));
+	} catch (e) {}
+
+	return report;
+}
+
 
 // 1. Dashboard summary stats
 app.get('/outreach/dashboard', async (c) => {
@@ -741,11 +888,20 @@ app.get('/outreach/dashboard', async (c) => {
 		};
 	}));
 
-	const autoPilotVal = await c.env.kv.get('outreach:autopilot');
+	const [autoPilotVal, autoScoutVal, autoModeVal, autoModeConfigVal, autoModeLastRunVal] = await Promise.all([
+		c.env.kv.get('outreach:autopilot'),
+		c.env.kv.get('outreach:autoscout'),
+		c.env.kv.get('outreach:automode:enabled'),
+		c.env.kv.get('outreach:automode:config'),
+		c.env.kv.get('outreach:automode:last_run')
+	]);
 	const autoPilotEnabled = autoPilotVal === '1';
-
-	const autoScoutVal = await c.env.kv.get('outreach:autoscout');
 	const autoScoutEnabled = autoScoutVal === '1';
+	const autoModeEnabled = autoModeVal === '1';
+	let autoModeConfig = { intervalMinutes: 30, target: 'both', batchSize: 5 };
+	try { if (autoModeConfigVal) autoModeConfig = JSON.parse(autoModeConfigVal); } catch {}
+	let autoModeLastRun = null;
+	try { if (autoModeLastRunVal) autoModeLastRun = JSON.parse(autoModeLastRunVal); } catch {}
 
 	const [jobPromptVal, clientPromptVal, globalPromptVal] = await Promise.all([
 		c.env.kv.get('outreach:system_prompt:job_hunting'),
@@ -764,6 +920,11 @@ app.get('/outreach/dashboard', async (c) => {
 		data: {
 			autopilot: autoPilotEnabled,
 			autoscout: autoScoutEnabled,
+			automode: {
+				enabled: autoModeEnabled,
+				config: autoModeConfig,
+				lastRun: autoModeLastRun
+			},
 			campaigns: campaignsRes.results || [],
 			stats: {
 				total_leads: Number(leadsStatsRes?.total_leads) || 0,
@@ -1427,6 +1588,32 @@ app.post('/outreach/autoscout/toggle', async (c) => {
 		code: 200,
 		message: `Autonomous Auto-Scouting is now ${enabled ? 'ACTIVE' : 'PAUSED'}`,
 		data: { enabled: Boolean(enabled) }
+	});
+});
+
+// Toggle Full Autonomous Auto Mode
+app.post('/outreach/automode/toggle', async (c) => {
+	const body = await c.req.json();
+	const enabled = Boolean(body.enabled);
+	await c.env.kv.put('outreach:automode:enabled', enabled ? '1' : '0');
+	if (body.config) {
+		await c.env.kv.put('outreach:automode:config', JSON.stringify(body.config));
+	}
+	return c.json({
+		code: 200,
+		message: `Full Autonomous Auto Mode is now ${enabled ? 'ACTIVATED' : 'PAUSED'}`,
+		data: { enabled }
+	});
+});
+
+// Run Full Auto Cycle Immediately on Demand
+app.post('/outreach/automode/run-now', async (c) => {
+	const body = await c.req.json().catch(() => ({}));
+	const report = await executeFullAutoOutreachCycle(c, body);
+	return c.json({
+		code: 200,
+		message: report.message,
+		data: report
 	});
 });
 

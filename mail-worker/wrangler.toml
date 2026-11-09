@@ -28,7 +28,7 @@ not_found_handling = "single-page-application"
 run_worker_first = true
 
 [triggers]
-crons = ["0 * * * *"]
+crons = ["*/30 * * * *"]
 
 [vars]
 jwt_secret = "9e33ea42a966b86bae2eabe0c8a0953291c27df32598730ba624424daf21da41"
