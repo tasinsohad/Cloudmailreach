@@ -1218,11 +1218,11 @@ export async function executeFullAutoOutreachCycle(c, options = {}) {
 }
 
 
-// 1. Dashboard summary stats
+// 1. Dashboard summary stats with Per-Inbox Bounce Rate & Deliverability Tracking
 app.get('/outreach/dashboard', async (c) => {
 	const db = c.env.db;
 
-	const [campaignsRes, leadsStatsRes, accountsRes, recentRepliesRes, settingRow, llmConfigsRes] = await Promise.all([
+	const [campaignsRes, leadsStatsRes, accountsRes, recentRepliesRes, settingRow, llmConfigsRes, emailStatsRes, leadSendersRes] = await Promise.all([
 		db.prepare(`SELECT * FROM campaign ORDER BY campaign_id ASC`).all(),
 		db.prepare(`
 			SELECT 
@@ -1242,7 +1242,29 @@ app.get('/outreach/dashboard', async (c) => {
 			ORDER BY l.reply_time DESC LIMIT 10
 		`).all(),
 		db.prepare(`SELECT tg_bot_token, tg_chat_id, tg_bot_status, custom_domain FROM setting LIMIT 1`).first(),
-		db.prepare(`SELECT * FROM llm_config ORDER BY priority ASC, config_id ASC`).all()
+		db.prepare(`SELECT * FROM llm_config ORDER BY priority ASC, config_id ASC`).all(),
+		db.prepare(`
+			SELECT 
+				LOWER(TRIM(send_email)) as send_email, 
+				COUNT(*) as total_sent, 
+				COALESCE(SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END), 0) as delivered_count, 
+				COALESCE(SUM(CASE WHEN status = 3 THEN 1 ELSE 0 END), 0) as bounced_count, 
+				COALESCE(SUM(CASE WHEN status = 4 THEN 1 ELSE 0 END), 0) as complained_count,
+				COALESCE(SUM(CASE WHEN status = 6 THEN 1 ELSE 0 END), 0) as failed_count
+			FROM email 
+			WHERE type = 1 AND is_del = 0 
+			GROUP BY LOWER(TRIM(send_email))
+		`).all().catch(() => ({ results: [] })),
+		db.prepare(`
+			SELECT 
+				LOWER(TRIM(sender_email)) as sender_email, 
+				COUNT(*) as total_leads_sent, 
+				COALESCE(SUM(CASE WHEN status = 'replied' THEN 1 ELSE 0 END), 0) as replied_count, 
+				COALESCE(SUM(CASE WHEN status = 'bounced' THEN 1 ELSE 0 END), 0) as bounced_count 
+			FROM outreach_lead 
+			WHERE status IN ('sent', 'replied', 'bounced') AND sender_email IS NOT NULL AND sender_email != ''
+			GROUP BY LOWER(TRIM(sender_email))
+		`).all().catch(() => ({ results: [] }))
 	]);
 
 	const domains = c.env.domain || [];
@@ -1251,18 +1273,131 @@ app.get('/outreach/dashboard', async (c) => {
 
 	const dateStr = dayjs().format('YYYY-MM-DD');
 	const rawAccounts = accountsRes.results || [];
+	const emailStatsMap = new Map((emailStatsRes?.results || []).map(r => [(r.send_email || '').toLowerCase().trim(), r]));
+	const leadStatsMap = new Map((leadSendersRes?.results || []).map(r => [(r.sender_email || '').toLowerCase().trim(), r]));
+
 	const accountsWithStats = await Promise.all(rawAccounts.map(async (acc) => {
 		const accId = acc.account_id || acc.accountId;
 		const accountDailyKey = kvConst.SEND_DAY_COUNT + 'account:' + accId + ':' + dateStr;
 		const sentToday = Number(await c.env.kv.get(accountDailyKey) || 0);
 		const limit = acc.daily_send_limit ?? 30;
+
+		const emailKey = (acc.email || '').toLowerCase().trim();
+		const eStats = emailStatsMap.get(emailKey) || {};
+		const lStats = leadStatsMap.get(emailKey) || {};
+
+		const totalSent = Math.max(Number(eStats.total_sent || 0), Number(lStats.total_leads_sent || 0));
+		const deliveredCount = Number(eStats.delivered_count || 0);
+		const bouncedCount = Math.max(Number(eStats.bounced_count || 0), Number(lStats.bounced_count || 0));
+		const complainedCount = Number(eStats.complained_count || 0);
+		const repliedCount = Number(lStats.replied_count || 0);
+
+		// Calculate bounce rate %
+		const bounceRate = totalSent > 0 ? Number(((bouncedCount / totalSent) * 100).toFixed(1)) : 0.0;
+		const replyRate = totalSent > 0 ? Number(((repliedCount / totalSent) * 100).toFixed(1)) : 0.0;
+
+		// Deliverability Health Score calculation (0 - 100)
+		let healthScore = 100;
+		if (totalSent > 0) {
+			if (bounceRate > 5.0) {
+				healthScore -= Math.min(65, Math.round(30 + (bounceRate - 5) * 8));
+			} else if (bounceRate > 2.0) {
+				healthScore -= Math.min(30, Math.round(10 + (bounceRate - 2) * 6));
+			} else if (bounceRate > 0) {
+				healthScore -= Math.min(10, Math.round(bounceRate * 4));
+			}
+
+			if (complainedCount > 0) {
+				healthScore -= Math.min(50, complainedCount * 25);
+			}
+
+			if (totalSent >= 25 && repliedCount === 0 && bouncedCount === 0) {
+				healthScore -= 5;
+			}
+		}
+		healthScore = Math.max(10, Math.min(100, healthScore));
+
+		let healthStatus = 'pristine';
+		let spamRisk = 'low';
+		if (totalSent === 0) {
+			healthStatus = 'pristine';
+			spamRisk = 'low';
+		} else if (healthScore >= 90) {
+			healthStatus = 'excellent';
+			spamRisk = 'low';
+		} else if (healthScore >= 75) {
+			healthStatus = 'good';
+			spamRisk = 'low';
+		} else if (healthScore >= 50) {
+			healthStatus = 'warning';
+			spamRisk = 'moderate';
+		} else {
+			healthStatus = 'at_risk';
+			spamRisk = 'critical';
+		}
+
 		return {
 			...acc,
 			daily_send_limit: limit,
 			sent_today: sentToday,
-			remaining: Math.max(0, limit - sentToday)
+			remaining: Math.max(0, limit - sentToday),
+			total_sent: totalSent,
+			delivered_count: deliveredCount,
+			bounced_count: bouncedCount,
+			complained_count: complainedCount,
+			replied_count: repliedCount,
+			bounce_rate: bounceRate,
+			reply_rate: replyRate,
+			health_score: healthScore,
+			health_status: healthStatus,
+			spam_risk: spamRisk
 		};
 	}));
+
+	// Compute aggregate swarm deliverability metrics
+	const swarmTotalSent = accountsWithStats.reduce((sum, a) => sum + (a.total_sent || 0), 0);
+	const swarmTotalBounced = accountsWithStats.reduce((sum, a) => sum + (a.bounced_count || 0), 0);
+	const swarmTotalDelivered = accountsWithStats.reduce((sum, a) => sum + (a.delivered_count || 0), 0);
+	const swarmTotalComplained = accountsWithStats.reduce((sum, a) => sum + (a.complained_count || 0), 0);
+	const swarmTotalReplied = accountsWithStats.reduce((sum, a) => sum + (a.replied_count || 0), 0);
+	const swarmBounceRate = swarmTotalSent > 0 ? Number(((swarmTotalBounced / swarmTotalSent) * 100).toFixed(1)) : 0.0;
+	const swarmReplyRate = swarmTotalSent > 0 ? Number(((swarmTotalReplied / swarmTotalSent) * 100).toFixed(1)) : 0.0;
+
+	const activeAccounts = accountsWithStats.filter(a => (a.total_sent || 0) > 0);
+	const avgHealth = activeAccounts.length > 0 
+		? Math.round(activeAccounts.reduce((sum, a) => sum + a.health_score, 0) / activeAccounts.length)
+		: 100;
+
+	let overallHealthStatus = 'Pristine Health';
+	let overallSpamRisk = 'low';
+	if (swarmBounceRate > 5.0 || swarmTotalComplained > 0) {
+		overallHealthStatus = 'High Spam Placement Risk';
+		overallSpamRisk = 'critical';
+	} else if (swarmBounceRate > 2.0) {
+		overallHealthStatus = 'Moderate Placement Warning';
+		overallSpamRisk = 'moderate';
+	} else if (avgHealth >= 90) {
+		overallHealthStatus = 'Pristine Health (Low Spam Risk)';
+		overallSpamRisk = 'low';
+	} else {
+		overallHealthStatus = 'Good Health';
+		overallSpamRisk = 'low';
+	}
+
+	const deliverability = {
+		total_sent: swarmTotalSent,
+		total_bounced: swarmTotalBounced,
+		total_delivered: swarmTotalDelivered,
+		total_complained: swarmTotalComplained,
+		total_replied: swarmTotalReplied,
+		overall_bounce_rate: swarmBounceRate,
+		overall_reply_rate: swarmReplyRate,
+		overall_health_score: avgHealth,
+		overall_health_status_label: overallHealthStatus,
+		overall_spam_risk: overallSpamRisk,
+		target_bounce_rate: '< 2.0%',
+		critical_bounce_threshold: '> 5.0%'
+	};
 
 	const [autoPilotVal, autoScoutVal, autoModeVal, autoModeConfigVal, autoModeLastRunVal] = await Promise.all([
 		c.env.kv.get('outreach:autopilot'),
@@ -1327,8 +1462,9 @@ IMPORTANT: Output your entire response ONLY as a valid JSON object: {"subject": 
 				queued_count: Number(leadsStatsRes?.queued_count) || 0,
 				sent_count: Number(leadsStatsRes?.sent_count) || 0,
 				replied_count: Number(leadsStatsRes?.replied_count) || 0,
-				bounced_count: Number(leadsStatsRes?.bounced_count) || 0
+				bounced_count: Math.max(Number(leadsStatsRes?.bounced_count) || 0, swarmTotalBounced)
 			},
+			deliverability,
 			accounts: accountsWithStats,
 			domains: {
 				all: domains,
@@ -2075,5 +2211,323 @@ app.post('/outreach/autopilot/preview', async (c) => {
 	return c.json({
 		code: 200,
 		data: result
+	});
+});
+
+
+// ============================================================================
+// 19. Deliverability & Spam Health Suite
+// ============================================================================
+
+// Helper to query Cloudflare DNS-over-HTTPS
+async function checkDomainDns(domain) {
+	const result = {
+		domain,
+		spf: { ok: false, raw: null },
+		dmarc: { ok: false, raw: null },
+		dkim: { ok: true, note: 'DKIM cryptographic signing managed by outbound relay' },
+		provider: ['nccwtech.com', 'saiftechnology.com'].includes(domain) ? 'Brevo' : 'Resend',
+		status: 'healthy',
+		recommendation: null
+	};
+
+	try {
+		// 1. Check SPF record
+		const spfRes = await fetch(`https://cloudflare-dns.com/dns-query?name=${domain}&type=TXT`, {
+			headers: { 'Accept': 'application/dns-json' }
+		});
+		if (spfRes.ok) {
+			const spfData = await spfRes.json();
+			const record = (spfData.Answer || []).find(a => a.data && a.data.includes('v=spf1'));
+			if (record) {
+				result.spf.ok = true;
+				result.spf.raw = record.data.replace(/^"|"$/g, '');
+			}
+		}
+
+		// 2. Check DMARC record
+		const dmarcRes = await fetch(`https://cloudflare-dns.com/dns-query?name=_dmarc.${domain}&type=TXT`, {
+			headers: { 'Accept': 'application/dns-json' }
+		});
+		if (dmarcRes.ok) {
+			const dmarcData = await dmarcRes.json();
+			const record = (dmarcData.Answer || []).find(a => a.data && a.data.includes('v=DMARC1'));
+			if (record) {
+				result.dmarc.ok = true;
+				result.dmarc.raw = record.data.replace(/^"|"$/g, '');
+			}
+		}
+
+		if (!result.spf.ok && !result.dmarc.ok) {
+			result.status = 'critical';
+			result.recommendation = `Missing both SPF and DMARC TXT records. Google and Yahoo will flag emails from ${domain} as high-risk spam.`;
+		} else if (!result.dmarc.ok) {
+			result.status = 'warning';
+			result.recommendation = `DMARC record missing! Add a TXT record for '_dmarc.${domain}' with value 'v=DMARC1; p=none; sp=none; aspf=r;' to ensure inbox placement with Google and Yahoo.`;
+		} else if (!result.spf.ok) {
+			result.status = 'warning';
+			result.recommendation = `SPF record missing! Add TXT record for '${domain}' with valid SPF relay.`;
+		}
+	} catch (e) {
+		console.warn(`DNS check failed for ${domain}:`, e.message);
+	}
+	return result;
+}
+
+// 19. Deliverability Health Audit
+app.get('/outreach/deliverability/health', async (c) => {
+	const db = c.env.db;
+	const domains = ['technetocrat.org', 'swiftsuretech.com', 'nccwtech.com', 'saiftechnology.com'];
+
+	// 1. Run live DNS checks across all 4 domains in parallel
+	const dnsChecks = await Promise.all(domains.map(d => checkDomainDns(d)));
+
+	// 2. Fetch recent bounce / spam events from email table
+	const recentEmailEvents = await db.prepare(`
+		SELECT email_id, send_email, to_email, subject, status, message, create_time 
+		FROM email 
+		WHERE status IN (3, 4, 6) 
+		ORDER BY create_time DESC 
+		LIMIT 20
+	`).all().catch(() => ({ results: [] }));
+
+	// 3. Fetch recent bounce / spam leads from outreach_lead
+	const recentLeadEvents = await db.prepare(`
+		SELECT lead_id, target_email, sender_email, subject, status, reply_text, update_time 
+		FROM outreach_lead 
+		WHERE status IN ('bounced', 'complained') 
+		ORDER BY update_time DESC 
+		LIMIT 20
+	`).all().catch(() => ({ results: [] }));
+
+	// 4. Return complete deliverability diagnostics
+	return c.json({
+		code: 200,
+		data: {
+			domains: dnsChecks,
+			recentEmailEvents: recentEmailEvents.results || [],
+			recentLeadEvents: recentLeadEvents.results || [],
+			spamPlacementGuide: {
+				signals: [
+					{
+						name: 'Bounce Rate Threshold',
+						status: 'Monitored',
+						threshold: 'Target < 2.0% | Warning > 2.0% | Critical > 5.0%',
+						description: 'Hard bounces happen when an email address is invalid or non-existent. When bounce rate exceeds 5%, ESPs and mail filters (Gmail, Outlook) automatically downgrade your domain IP reputation, causing future emails to land directly in Spam or Junk.'
+					},
+					{
+						name: 'Spam Complaint Webhooks',
+						status: 'Active',
+						threshold: 'Target < 0.1% | Critical > 0.3%',
+						description: 'Resend and Brevo instantly notify Cloud Mailreach via webhooks whenever a recipient clicks "Report Spam". If complaint rate exceeds 0.3%, sending is throttled immediately to prevent domain burning.'
+					},
+					{
+						name: 'Silent Spam Placement Detection (The Cold Trap Heuristic)',
+						status: 'Monitored',
+						threshold: 'Sent > 30 with 0% replies & 0% bounces',
+						description: 'When an inbox sends dozens of cold emails but receives 0 replies while other inboxes get replies, mailbox traffic is usually silently routed to the Spam folder or Google Promotions tab rather than the primary inbox.'
+					},
+					{
+						name: 'DNS DMARC & SPF Alignment',
+						status: 'Live Audited',
+						threshold: '100% PASS Required by Google & Yahoo (Feb 2024+)',
+						description: 'Without a published DMARC policy, modern recipient mail servers reject incoming cold outreach or deliver it straight to the Spam/Quarantine folder.'
+					}
+				]
+			}
+		}
+	});
+});
+
+// 20. Pre-Flight Cold Email Spam Trigger Scanner
+app.post('/outreach/deliverability/spam-check', async (c) => {
+	const { subject = '', body = '' } = await c.req.json();
+
+	const spamTriggers = [
+		'100% free', '100% satisfied', 'act now', 'apply now', 'all natural', 'as seen on',
+		'bad credit', 'bargain', 'be your own boss', 'best price', 'big bucks', 'billion',
+		'bonus', 'buy direct', 'call now', 'cancel at any time', 'cash bonus', 'cash prize',
+		'cents on the dollar', 'certified', 'cheap', 'claims', 'clearance', 'click here',
+		'click now', 'compare rates', 'congratulations', 'credit card', 'cure', 'dear friend',
+		'direct email', 'discount', 'double your income', 'earn cash', 'earn extra cash',
+		'earn money', 'eliminate debt', 'exclusive deal', 'expect to earn', 'extra income',
+		'fast cash', 'financial freedom', 'free consultation', 'free gift', 'free info',
+		'free membership', 'free preview', 'free sample', 'free trial', 'full refund',
+		'get out of debt', 'get paid', 'giveaway', 'guaranteed', 'hidden assets', 'income from home',
+		'increase sales', 'instant', 'investment', 'join millions', 'lifetime', 'limited time',
+		'lowest price', 'make money', 'millionaire', 'miracle', 'money back', 'mortgage rates',
+		'multi-level', 'no catch', 'no cost', 'no credit check', 'no experience', 'no fees',
+		'no gimmick', 'no hidden costs', 'no obligation', 'no purchase necessary', 'no risk',
+		'no strings attached', 'not spam', 'now only', 'once in a lifetime', 'one time',
+		'online marketing', 'open immediately', 'opportunity', 'order now', 'passwords',
+		'pennies a day', 'potential earnings', 'prize', 'promise you', 'pure profit',
+		'refinance', 'risk free', 'satisfaction guaranteed', 'save big', 'save money',
+		'score', 'special promotion', 'supplies are limited', 'take action', 'terms and conditions',
+		'this isn\'t spam', 'unlimited', 'unsecured credit', 'urgent', 'valuable', 'viagra',
+		'warranty', 'winner', 'winning', 'work from home', 'you have been selected', 'zero risk'
+	];
+
+	const detectedTriggers = [];
+	const subLower = (subject || '').toLowerCase();
+	const bodyLower = (body || '').toLowerCase();
+
+	let spamScore = 0;
+
+	for (const trigger of spamTriggers) {
+		const inSubject = subLower.includes(trigger);
+		const inBody = bodyLower.includes(trigger);
+		if (inSubject || inBody) {
+			const weight = inSubject ? 18 : 10;
+			spamScore += weight;
+			detectedTriggers.push({
+				trigger,
+				location: inSubject && inBody ? 'Subject & Body' : (inSubject ? 'Subject' : 'Body'),
+				penalty: weight
+			});
+		}
+	}
+
+	// Punctuation & case analysis
+	const excessiveExclamation = (subject + ' ' + body).match(/!{2,}/g);
+	if (excessiveExclamation) {
+		spamScore += 15;
+		detectedTriggers.push({ trigger: 'Multiple Exclamation Marks (!!)', location: 'Text', penalty: 15 });
+	}
+
+	const dollarSigns = (subject.match(/\$/g) || []).length;
+	if (dollarSigns > 0) {
+		spamScore += 15;
+		detectedTriggers.push({ trigger: 'Dollar Sign ($) in Subject', location: 'Subject', penalty: 15 });
+	}
+
+	// Uppercase ratio check
+	const words = (body || '').split(/\s+/).filter(Boolean);
+	const upperWords = words.filter(w => w.length > 2 && w === w.toUpperCase() && /[A-Z]/.test(w));
+	const upperRatio = words.length > 0 ? upperWords.length / words.length : 0;
+	if (upperRatio > 0.2 && words.length > 5) {
+		spamScore += 20;
+		detectedTriggers.push({ trigger: 'Excessive All-Caps Words (> 20%)', location: 'Body', penalty: 20 });
+	}
+
+	// Word count check
+	const wordCount = words.length;
+	const suggestions = [];
+
+	if (wordCount > 150) {
+		spamScore += 10;
+		suggestions.push(`Length is ${wordCount} words. Best practice cold outreach is 50–90 words for maximum replies and deliverability.`);
+	} else if (wordCount < 20 && wordCount > 0) {
+		spamScore += 10;
+		suggestions.push('Email is very short (< 20 words). Ensure there is sufficient personal context for the recipient.');
+	}
+
+	if (subject.length > 60) {
+		spamScore += 5;
+		suggestions.push('Subject line is over 60 characters. Keep subjects under 45 characters to display cleanly on mobile inboxes.');
+	}
+
+	if (detectedTriggers.length === 0) {
+		suggestions.push('Zero high-risk spam keywords detected. Copy is clean and personalized.');
+	} else {
+		suggestions.push('Remove or rephrase highlighted promotional buzzwords to bypass strict corporate spam gateways.');
+	}
+
+	spamScore = Math.min(100, spamScore);
+
+	let level = 'clean';
+	if (spamScore > 50) level = 'high_risk';
+	else if (spamScore > 25) level = 'moderate_risk';
+	else if (spamScore > 10) level = 'low_risk';
+
+	return c.json({
+		code: 200,
+		data: {
+			spamScore,
+			level,
+			detectedTriggers,
+			suggestions,
+			metrics: {
+				wordCount,
+				charCount: (body || '').length,
+				detectedTriggersCount: detectedTriggers.length
+			}
+		}
+	});
+});
+
+// 21. Deliverability Diagnostic Test Dispatcher
+app.post('/outreach/deliverability/test-send', async (c) => {
+	const { fromEmail, testEmail } = await c.req.json();
+	if (!testEmail || !testEmail.includes('@')) {
+		throw new BizError('A valid test destination email address is required');
+	}
+
+	const db = c.env.db;
+	let acc = null;
+	if (fromEmail) {
+		acc = await db.prepare(`SELECT account_id, email, name FROM account WHERE email = ? AND is_del = 0`).bind(fromEmail).first();
+	}
+	if (!acc) {
+		acc = await db.prepare(`SELECT account_id, email, name FROM account WHERE is_del = 0 ORDER BY account_id ASC LIMIT 1`).first();
+	}
+	if (!acc) {
+		throw new BizError('No active sending mailboxes found');
+	}
+
+	const senderDomain = (acc.email || '').split('@')[1] || '';
+	const timestamp = new Date().toUTCString();
+	const testSubject = `🛡️ Deliverability Diagnostic: ${acc.email} [${new Date().toISOString().slice(11, 19)}]`;
+	const testBody = `This is an automated deliverability diagnostic check from Cloud Mailreach.
+Sender: ${acc.email}
+Timestamp: ${timestamp}
+Domain: ${senderDomain}
+
+Authentication Check:
+- Return-Path / SPF: Evaluated by recipient MTA
+- DKIM Signature: Provided by relay provider
+- DMARC Alignment: Checked against ${senderDomain}
+
+If this email arrived in your Primary Inbox, your sender reputation and DNS authentication are working properly. If it landed in Spam or Junk, inspect the message headers ("Show Original" in Gmail) to verify SPF, DKIM, and DMARC.`;
+
+	await emailService.send(c, {
+		accountId: acc.account_id,
+		receiveEmail: [testEmail.trim()],
+		name: acc.name || 'Tasin Sohad',
+		subject: testSubject,
+		text: testBody,
+		content: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: #111; line-height: 1.6; max-width: 600px; padding: 24px; border: 1px solid #e2e8f0; border-radius: 10px; background: #ffffff;">
+			<div style="display: flex; align-items: center; margin-bottom: 16px;">
+				<h2 style="color: #4f46e5; margin: 0; font-size: 20px;">🛡️ Cloud Mailreach Deliverability Diagnostic</h2>
+			</div>
+			<p style="margin: 0 0 16px 0; color: #334155;">This is a live diagnostic placement test email dispatched directly from your cold outreach pool.</p>
+			
+			<div style="background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #4f46e5; border-radius: 6px; padding: 14px; margin-bottom: 20px; font-family: monospace; font-size: 13px; color: #1e293b;">
+				<div><strong>Sender Mailbox:</strong> ${acc.email}</div>
+				<div><strong>Target Destination:</strong> ${testEmail.trim()}</div>
+				<div><strong>Timestamp:</strong> ${timestamp}</div>
+				<div><strong>Authenticated Domain:</strong> ${senderDomain}</div>
+			</div>
+
+			<h3 style="color: #0f172a; font-size: 15px; margin: 0 0 10px 0;">How to verify your Inbox Placement:</h3>
+			<ol style="margin: 0; padding-left: 20px; color: #334155; line-height: 1.7;">
+				<li><strong>Placement Verification:</strong> Confirm if this email landed in your <strong>Primary Inbox</strong>, <strong>Promotions</strong>, or <strong>Spam / Junk</strong> folder.</li>
+				<li><strong>Authentication Headers:</strong> In Gmail, click <em>More (three dots) &rarr; "Show original"</em>. In Outlook, click <em>"View message source"</em>.</li>
+				<li><strong>Pass Requirements:</strong> Ensure all 3 say <strong>SPF: PASS</strong>, <strong>DKIM: PASS</strong>, and <strong>DMARC: PASS</strong>.</li>
+			</ol>
+
+			<hr style="border: none; border-top: 1px solid #f1f5f9; margin: 24px 0 16px 0;" />
+			<div style="font-size: 12px; color: #94a3b8; text-align: center;">
+				Cloud Mailreach Autonomous Cold Outreach Engine · Built for Tasin Sohad
+			</div>
+		</div>`,
+		sendType: 'new',
+		outreachSource: 'diagnostic_test',
+		outreachCampaign: 'Deliverability Diagnostic',
+		attachments: []
+	}, 1);
+
+	return c.json({
+		code: 200,
+		message: `Diagnostic test email sent from ${acc.email} to ${testEmail}. Check your inbox or spam folder.`
 	});
 });

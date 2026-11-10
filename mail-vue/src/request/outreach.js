@@ -114,3 +114,15 @@ export function runAutoModeCycleNow(options = {}) {
 
 
 
+
+export function getDeliverabilityHealth() {
+    return http.get('/outreach/deliverability/health');
+}
+
+export function checkEmailSpam(data) {
+    return http.post('/outreach/deliverability/spam-check', data);
+}
+
+export function sendDeliverabilityTest(data) {
+    return http.post('/outreach/deliverability/test-send', data);
+}
