@@ -1965,7 +1965,7 @@ async function handleScoutCareerOps(count = 5) {
     const res = await triggerScoutOpportunities('job_hunting', count);
     const added = res?.data?.added ?? res?.added ?? count;
     ElMessage.success(`Career-Ops Scout discovered & queued ${added} fresh job opportunities!`);
-    await Promise.all([fetchData(), loadLeads()]);
+    await Promise.all([fetchData(), loadLeads(), loadDeliverabilityHealth(false)]);
   } catch (err) {
     ElMessage.error(err.message || 'Scouting failed');
   } finally {
@@ -2098,8 +2098,8 @@ const deliverability = reactive({
 });
 
 const dnsDomains = ref([
-  { domain: 'technetocrat.org', provider: 'Resend', spf: { ok: true }, dkim: { ok: true }, dmarc: { ok: false }, recommendation: 'Add DMARC TXT record in Cloudflare DNS for primary inbox delivery.' },
-  { domain: 'swiftsuretech.com', provider: 'Resend', spf: { ok: true }, dkim: { ok: true }, dmarc: { ok: false }, recommendation: 'Add DMARC TXT record in Cloudflare DNS for primary inbox delivery.' },
+  { domain: 'technetocrat.org', provider: 'Resend', spf: { ok: true }, dkim: { ok: true }, dmarc: { ok: true }, recommendation: null },
+  { domain: 'swiftsuretech.com', provider: 'Resend', spf: { ok: true }, dkim: { ok: true }, dmarc: { ok: true }, recommendation: null },
   { domain: 'nccwtech.com', provider: 'Brevo', spf: { ok: true }, dkim: { ok: true }, dmarc: { ok: true }, recommendation: null },
   { domain: 'saiftechnology.com', provider: 'Brevo', spf: { ok: true }, dkim: { ok: true }, dmarc: { ok: true }, recommendation: null }
 ]);
@@ -2124,7 +2124,7 @@ function copyDmarcRecord() {
   ElMessage.success('Copied DMARC record to clipboard: ' + dmarcVal);
 }
 
-async function loadDeliverabilityHealth() {
+async function loadDeliverabilityHealth(isManual = true) {
   loadingHealth.value = true;
   try {
     const res = await getDeliverabilityHealth();
@@ -2132,7 +2132,7 @@ async function loadDeliverabilityHealth() {
     if (d && Array.isArray(d.domains)) {
       dnsDomains.value = d.domains;
     }
-    ElMessage.success('DNS authentication & deliverability audit refreshed!');
+    if (isManual) ElMessage.success('DNS authentication & deliverability audit refreshed!');
   } catch (err) {
     ElMessage.error(err.message || 'Failed to load deliverability health');
   } finally {
