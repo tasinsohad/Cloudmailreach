@@ -305,12 +305,13 @@
           </button>
           <button 
             type="button" 
-            class="tab-nav-pill" 
+            class="tab-nav-pill highlight-leads" 
             :class="{ active: activeTab === 'leads' }" 
             @click="activeTab = 'leads'"
           >
-            <Icon icon="fluent:people-list-20-regular" width="16" height="16" />
-            <span>📋 Leads Queue</span>
+            <Icon icon="fluent:send-clock-20-regular" width="16" height="16" />
+            <span>📋 Found &amp; Dispatched Activity</span>
+            <span v-if="stats.total_leads > 0" class="inbox-pill-badge" style="background: #2563eb;">{{ stats.total_leads }}</span>
           </button>
         </div>
 
@@ -1312,92 +1313,242 @@
             </div>
           </el-tab-pane>
 
-          <!-- TAB 6: Leads Queue -->
-          <el-tab-pane label="Leads Queue" name="leads">
+          <!-- TAB: Discovered Opportunities & Dispatched Activity -->
+          <el-tab-pane label="📋 Found & Dispatched Activity" name="leads">
             <div class="section-card">
               <div class="section-header">
                 <div class="section-title">
-                  <Icon icon="fluent:people-list-20-regular" width="20" height="20" />
-                  <span>Outreach Leads Queue</span>
+                  <Icon icon="fluent:document-bullet-list-clock-24-filled" width="22" height="22" style="color: #2563eb;" />
+                  <div>
+                    <span>Discovered Opportunities &amp; Dispatched Activity Log</span>
+                    <div style="font-size: 13px; font-weight: 400; color: #64748b; margin-top: 2px;">
+                      Complete visibility into what Career-Ops &amp; Harvey found across 7 live developer feeds, and to whom personalized emails were dispatched.
+                    </div>
+                  </div>
                 </div>
-                <div class="table-filters">
-                  <el-select v-model="filterCampaign" placeholder="All Campaigns" style="width: 220px;" @change="loadLeads">
-                    <el-option label="All Campaigns" value="" />
-                    <el-option v-for="c in campaigns" :key="c.campaign_id" :label="c.name" :value="c.campaign_id" />
-                  </el-select>
-                  <el-select v-model="filterStatus" placeholder="All Statuses" style="width: 140px;" @change="loadLeads">
-                    <el-option label="All Statuses" value="all" />
-                    <el-option label="Queued" value="queued" />
-                    <el-option label="Sent" value="sent" />
-                    <el-option label="Replied" value="replied" />
-                  </el-select>
+                <div class="header-action-buttons">
+                  <el-button size="small" :loading="loadingLeads" @click="loadLeads">
+                    <Icon icon="fluent:arrow-sync-20-regular" width="15" height="15" style="margin-right: 4px;" />
+                    Refresh Activity
+                  </el-button>
                   <el-button 
                     type="danger" 
                     plain 
+                    size="small"
                     @click="handleClearAllLeads" 
                     :loading="loadingLeads"
                   >
-                    <Icon icon="fluent:delete-dismiss-24-regular" style="margin-right: 4px;" />
+                    <Icon icon="fluent:delete-dismiss-24-regular" width="15" height="15" style="margin-right: 4px;" />
                     Reset Stats / Clear Leads
                   </el-button>
                 </div>
               </div>
 
-              <el-table :data="leadsList" v-loading="loadingLeads" style="width: 100%" stripe>
-                <el-table-column prop="target_email" label="Prospect Email" min-width="180" />
-                <el-table-column prop="target_name" label="Name" min-width="120">
-                  <template #default="{ row }">
-                    {{ row.target_name || '-' }}
+              <!-- Top KPI Activity Strip -->
+              <div class="activity-kpi-strip">
+                <div class="act-kpi-item" :class="{ active: leadsFilterType === 'all' }" @click="leadsFilterType = 'all'">
+                  <div class="ak-count">{{ leadsList.length }}</div>
+                  <div class="ak-label">All Opportunities Found</div>
+                </div>
+                <div class="act-kpi-item dispatched" :class="{ active: leadsFilterType === 'sent' }" @click="leadsFilterType = 'sent'">
+                  <div class="ak-count">{{ stats.sent_count || 0 }}</div>
+                  <div class="ak-label">📤 Dispatched Emails</div>
+                </div>
+                <div class="act-kpi-item queued" :class="{ active: leadsFilterType === 'queued' }" @click="leadsFilterType = 'queued'">
+                  <div class="ak-count">{{ stats.queued_count || 0 }}</div>
+                  <div class="ak-label">⏳ Queued in Buffer</div>
+                </div>
+                <div class="act-kpi-item replied" :class="{ active: leadsFilterType === 'replied' }" @click="leadsFilterType = 'replied'">
+                  <div class="ak-count">{{ stats.replied_count || 0 }}</div>
+                  <div class="ak-label">🎉 Inbound Replies ({{ replyRate }}%)</div>
+                </div>
+              </div>
+
+              <!-- Filter Toolbar -->
+              <div class="activity-filter-bar">
+                <el-input 
+                  v-model="leadsSearch" 
+                  placeholder="Search by company, prospect email, role, or subject..." 
+                  clearable 
+                  size="default" 
+                  style="max-width: 360px;" 
+                >
+                  <template #prefix>
+                    <Icon icon="fluent:search-20-regular" />
                   </template>
-                </el-table-column>
-                <el-table-column prop="company" label="Company" min-width="140">
+                </el-input>
+
+                <el-select v-model="filterCampaign" placeholder="All Campaigns" style="width: 220px;" @change="loadLeads">
+                  <el-option label="All Campaigns" value="" />
+                  <el-option v-for="c in campaigns" :key="c.campaign_id" :label="c.name" :value="c.campaign_id" />
+                </el-select>
+
+                <div class="act-filter-chips">
+                  <button 
+                    type="button" 
+                    class="act-chip" 
+                    :class="{ active: leadsFilterType === 'all' }" 
+                    @click="leadsFilterType = 'all'"
+                  >
+                    All Records
+                  </button>
+                  <button 
+                    type="button" 
+                    class="act-chip" 
+                    :class="{ active: leadsFilterType === 'sent' }" 
+                    @click="leadsFilterType = 'sent'"
+                  >
+                    📤 Dispatched Messages ({{ stats.sent_count || 0 }})
+                  </button>
+                  <button 
+                    type="button" 
+                    class="act-chip" 
+                    :class="{ active: leadsFilterType === 'queued' }" 
+                    @click="leadsFilterType = 'queued'"
+                  >
+                    📥 Queued Opportunities ({{ stats.queued_count || 0 }})
+                  </button>
+                  <button 
+                    type="button" 
+                    class="act-chip" 
+                    :class="{ active: leadsFilterType === 'replied' }" 
+                    @click="leadsFilterType = 'replied'"
+                  >
+                    🎉 Replied Prospects ({{ stats.replied_count || 0 }})
+                  </button>
+                </div>
+              </div>
+
+              <!-- Master Activity Table -->
+              <el-table 
+                :data="filteredLeadsList" 
+                v-loading="loadingLeads" 
+                style="width: 100%; margin-top: 14px;" 
+                stripe 
+                class="activity-master-table"
+              >
+                <!-- Prospect & Company ("To Whom") -->
+                <el-table-column label="Prospect & Company" min-width="210">
                   <template #default="{ row }">
-                    {{ row.company || '-' }}
-                  </template>
-                </el-table-column>
-                <el-table-column label="Country & Local Time" min-width="210">
-                  <template #default="{ row }">
-                    <div style="display: flex; flex-direction: column; gap: 3px;">
-                      <span style="font-weight: 600; font-size: 13px; color: #1e293b;">
-                        {{ row.country || 'United States' }}
-                      </span>
-                      <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                        <span style="font-size: 12px; color: #64748b; font-family: monospace;">
-                          {{ row.local_time ? row.local_time + ' ' + (row.weekday || '') : '09:00 AM' }}
-                        </span>
-                        <el-tag size="small" :type="row.is_window_open !== false ? 'success' : 'warning'" effect="plain" round>
-                          {{ row.is_window_open !== false ? '🟢 Open (9am–5pm)' : '🟡 Holding (Off-hours)' }}
-                        </el-tag>
+                    <div class="act-prospect-cell">
+                      <div class="act-prospect-company">
+                        <strong>{{ row.company || 'Direct Tech Lead' }}</strong>
+                      </div>
+                      <div class="act-prospect-email">
+                        <code>{{ row.target_email }}</code>
+                      </div>
+                      <div class="act-prospect-name" v-if="row.target_name">
+                        👤 {{ row.target_name }}
                       </div>
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="campaign_name" label="Campaign" min-width="170">
+
+                <!-- Opportunity / Role & Source ("What It Found") -->
+                <el-table-column label="Role Found &amp; Source" min-width="230">
                   <template #default="{ row }">
-                    <el-tag size="small" :type="row.campaign_type === 'job_hunting' ? 'success' : 'primary'">
-                      {{ row.campaign_name }}
-                    </el-tag>
+                    <div class="act-role-cell">
+                      <div class="act-role-title">
+                        {{ row.role || 'Senior Software / AI Engineer' }}
+                      </div>
+                      <div class="act-source-row">
+                        <el-tag size="small" :type="getSourceBadge(row.source).type" effect="plain">
+                          {{ getSourceBadge(row.source).label }}
+                        </el-tag>
+                        <span class="act-discovered-time" v-if="row.created_time">
+                          Found {{ formatDate(row.created_time) }}
+                        </span>
+                      </div>
+                    </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="sender_email" label="Dispatched From" min-width="180">
+
+                <!-- Dispatched From (Mailbox) -->
+                <el-table-column label="Dispatched From" min-width="190">
                   <template #default="{ row }">
-                    <span v-if="row.sender_email">{{ row.sender_email }}</span>
-                    <span v-else style="color: #999;">Rotates on send</span>
+                    <div v-if="row.sender_email" class="act-sender-box">
+                      <div class="act-sender-email">{{ row.sender_email }}</div>
+                      <el-tag size="small" type="info" effect="plain">
+                        {{ row.sender_email.split('@')[1] }}
+                      </el-tag>
+                    </div>
+                    <div v-else class="act-sender-rotating">
+                      <span class="status-dot"></span>
+                      <span>Rotates across 20 inboxes on send</span>
+                    </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="status" label="Status" width="110">
+
+                <!-- Sent Email Content / Subject -->
+                <el-table-column label="Outreach Subject &amp; Message" min-width="260">
                   <template #default="{ row }">
-                    <el-tag :type="getStatusTag(row.status)">{{ row.status }}</el-tag>
+                    <div class="act-msg-cell">
+                      <div class="act-msg-subject">
+                        <strong>{{ row.subject || '(Pending AI Generation on dispatch)' }}</strong>
+                      </div>
+                      <div v-if="row.body" class="act-msg-snippet">
+                        {{ row.body.length > 90 ? row.body.slice(0, 90) + '...' : row.body }}
+                      </div>
+                      <div v-if="row.body" class="act-view-msg-btn">
+                        <el-button size="small" type="primary" link @click="openSentMessageModal(row)">
+                          <Icon icon="fluent:document-search-16-regular" width="14" height="14" style="margin-right: 3px;" />
+                          👁️ View Message Sent
+                        </el-button>
+                      </div>
+                    </div>
                   </template>
                 </el-table-column>
-                <el-table-column label="Actions" width="100" align="center">
+
+                <!-- Status & Timeline -->
+                <el-table-column label="Status &amp; Timeline" width="160" align="center">
                   <template #default="{ row }">
-                    <el-button type="danger" text size="small" @click="handleDeleteLead(row)">
-                      Delete
-                    </el-button>
+                    <div class="act-status-cell">
+                      <el-tag :type="getStatusTag(row.status)" effect="dark" size="small">
+                        {{ row.status === 'sent' ? '✓ Dispatched' : (row.status === 'replied' ? '🎉 Replied' : '⏳ Queued') }}
+                      </el-tag>
+                      <div class="act-time-sub">
+                        <span v-if="row.status === 'sent' && row.sent_time">
+                          Sent: {{ formatDate(row.sent_time) }}
+                        </span>
+                        <span v-else-if="row.status === 'replied' && row.reply_time">
+                          Replied: {{ formatDate(row.reply_time) }}
+                        </span>
+                        <span v-else>
+                          In Dispatch Queue
+                        </span>
+                      </div>
+                    </div>
+                  </template>
+                </el-table-column>
+
+                <!-- Country & Local Time -->
+                <el-table-column label="Recipient Timezone" width="170">
+                  <template #default="{ row }">
+                    <div class="act-tz-cell">
+                      <span class="act-tz-country">{{ row.country || 'United States' }}</span>
+                      <span class="act-tz-time">{{ row.local_time || '09:00 AM' }}</span>
+                      <el-tag size="small" :type="row.is_window_open !== false ? 'success' : 'warning'" effect="plain">
+                        {{ row.is_window_open !== false ? '🟢 Window Open' : '🟡 Holding' }}
+                      </el-tag>
+                    </div>
+                  </template>
+                </el-table-column>
+
+                <!-- Actions -->
+                <el-table-column label="Actions" width="110" align="center" fixed="right">
+                  <template #default="{ row }">
+                    <div style="display: flex; flex-direction: column; gap: 4px; align-items: center;">
+                      <el-button v-if="row.body" type="primary" link size="small" @click="openSentMessageModal(row)">
+                        Inspect
+                      </el-button>
+                      <el-button type="danger" link size="small" @click="handleDeleteLead(row)">
+                        Delete
+                      </el-button>
+                    </div>
                   </template>
                 </el-table-column>
               </el-table>
+
             </div>
           </el-tab-pane>
 
@@ -2199,6 +2350,58 @@
       </div>
     </el-dialog>
 
+    <!-- Dialog: Inspect Sent Email Message -->
+    <el-dialog 
+      v-model="showSentMessageModal" 
+      title="Dispatched Outbound Message Details" 
+      width="680px"
+      destroy-on-close
+    >
+      <div v-if="selectedSentLead" class="sent-modal-content">
+        <div class="sent-meta-card">
+          <div class="sm-row">
+            <span class="sm-label">Recipient:</span>
+            <span class="sm-value"><strong>{{ selectedSentLead.target_name }}</strong> &lt;{{ selectedSentLead.target_email }}&gt;</span>
+          </div>
+          <div class="sm-row">
+            <span class="sm-label">Company &amp; Role:</span>
+            <span class="sm-value">🏢 {{ selectedSentLead.company }} — <em>{{ selectedSentLead.role || 'Engineering Lead' }}</em></span>
+          </div>
+          <div class="sm-row">
+            <span class="sm-label">Dispatched From:</span>
+            <span class="sm-value"><code>{{ selectedSentLead.sender_email || 'Auto-rotated inbox' }}</code></span>
+          </div>
+          <div class="sm-row" v-if="selectedSentLead.sent_time">
+            <span class="sm-label">Sent At:</span>
+            <span class="sm-value">{{ formatDate(selectedSentLead.sent_time) }}</span>
+          </div>
+          <div class="sm-row" v-if="selectedSentLead.source">
+            <span class="sm-label">Discovered Source:</span>
+            <span class="sm-value"><el-tag size="small" effect="plain">{{ getSourceBadge(selectedSentLead.source).label }}</el-tag></span>
+          </div>
+        </div>
+
+        <div class="sent-subject-box">
+          <span class="ss-label">Subject:</span>
+          <span class="ss-val">{{ selectedSentLead.subject || '(no subject)' }}</span>
+        </div>
+
+        <div class="sent-body-box">
+          <div class="sb-header">
+            <span>Email Body (Sent as Tasin Sohad):</span>
+            <el-button size="small" link type="primary" @click="copyEmailText(selectedSentLead.body)">
+              <Icon icon="fluent:copy-16-regular" width="14" height="14" style="margin-right: 4px;" />
+              Copy Body
+            </el-button>
+          </div>
+          <div class="sb-text whitespace-pre">{{ selectedSentLead.body || '(Email content pending generation)' }}</div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showSentMessageModal = false">Close</el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
 
@@ -2265,6 +2468,63 @@ watch(activeTab, (newTab) => {
   }
 });
 const loading = ref(false);
+const leadsSearch = ref('');
+const leadsFilterType = ref('all'); // 'all', 'sent', 'queued', 'replied'
+const showSentMessageModal = ref(false);
+const selectedSentLead = ref(null);
+
+const filteredLeadsList = computed(() => {
+  let list = leadsList.value;
+  if (leadsFilterType.value === 'sent') {
+    list = list.filter(l => ['sent', 'replied'].includes(l.status));
+  } else if (leadsFilterType.value === 'queued') {
+    list = list.filter(l => l.status === 'queued');
+  } else if (leadsFilterType.value === 'replied') {
+    list = list.filter(l => l.status === 'replied');
+  }
+
+  if (leadsSearch.value && leadsSearch.value.trim()) {
+    const q = leadsSearch.value.trim().toLowerCase();
+    list = list.filter(l => 
+      (l.company || '').toLowerCase().includes(q) ||
+      (l.target_email || '').toLowerCase().includes(q) ||
+      (l.target_name || '').toLowerCase().includes(q) ||
+      (l.role || '').toLowerCase().includes(q) ||
+      (l.subject || '').toLowerCase().includes(q) ||
+      (l.sender_email || '').toLowerCase().includes(q) ||
+      (l.source || '').toLowerCase().includes(q)
+    );
+  }
+
+  return list;
+});
+
+function openSentMessageModal(row) {
+  selectedSentLead.value = row;
+  showSentMessageModal.value = true;
+}
+
+function copyEmailText(text) {
+  if (!text) return;
+  navigator.clipboard.writeText(text);
+  ElMessage.success('Email body copied to clipboard!');
+}
+
+function getSourceBadge(source) {
+  const map = {
+    hn_whoishiring: { label: '🟠 Hacker News Live', type: 'warning' },
+    jobicy: { label: '🔵 Jobicy Engineering', type: 'primary' },
+    remote_ok: { label: '🟣 RemoteOK', type: 'info' },
+    remotive: { label: '🟢 Remotive API', type: 'success' },
+    arbeitnow: { label: '🟡 Arbeitnow Tech', type: 'warning' },
+    weworkremotely: { label: '🌐 WeWorkRemotely', type: 'info' },
+    himalayas: { label: '🏔️ Himalayas API', type: 'primary' },
+    harvey: { label: '🎯 Harvey B2B Radar', type: 'primary' },
+    career_ops: { label: '💼 Career-Ops Radar', type: 'success' }
+  };
+  return map[source] || { label: source || 'Direct Seed', type: 'info' };
+}
+
 const loadingLeads = ref(false);
 const dispatching = ref(false);
 const savingTg = ref(false);
@@ -5999,6 +6259,308 @@ onMounted(async () => {
   background: #fef2f2;
   border: 1px solid #fecaca;
   color: #991b1b;
+}
+
+
+/* Activity & Dispatches Table Styles */
+.highlight-leads {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%) !important;
+  border-color: #bfdbfe !important;
+  color: #1d4ed8 !important;
+  font-weight: 600;
+}
+
+.highlight-leads:hover,
+.highlight-leads.active {
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3) !important;
+}
+
+.activity-kpi-strip {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  margin-bottom: 16px;
+}
+
+.act-kpi-item {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 140px;
+}
+
+.act-kpi-item:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.act-kpi-item.active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: white;
+}
+
+.act-kpi-item.active .ak-label {
+  color: #94a3b8;
+}
+
+.act-kpi-item.active .ak-count {
+  color: #ffffff;
+}
+
+.ak-count {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.ak-label {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.activity-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: #ffffff;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+
+.act-filter-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.act-chip {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.act-chip:hover {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.act-chip.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.act-prospect-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.act-prospect-company {
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.act-prospect-email code {
+  font-size: 12px;
+  color: #2563eb;
+  background: #eff6ff;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.act-prospect-name {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.act-role-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.act-role-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.act-source-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.act-discovered-time {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.act-sender-box {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.act-sender-email {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.act-sender-rotating {
+  font-size: 12px;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.act-msg-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.act-msg-subject {
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.act-msg-snippet {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.act-status-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+}
+
+.act-time-sub {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.act-tz-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.act-tz-country {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.act-tz-time {
+  font-size: 11.5px;
+  color: #64748b;
+  font-family: monospace;
+}
+
+/* Sent Modal Styling */
+.sent-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sent-meta-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sm-row {
+  display: flex;
+  font-size: 13px;
+  gap: 10px;
+}
+
+.sm-label {
+  width: 140px;
+  min-width: 140px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.sm-value {
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.sent-subject-box {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  gap: 8px;
+  font-size: 13.5px;
+}
+
+.ss-label {
+  font-weight: 700;
+  color: #475569;
+}
+
+.ss-val {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.sent-body-box {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.sb-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.sb-text {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #1e293b;
 }
 
 </style>

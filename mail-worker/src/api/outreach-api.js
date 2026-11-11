@@ -984,9 +984,9 @@ export async function scoutOpportunities(c, type = 'service_outreach', count = 2
 			const tzInfo = detectLeadCountryAndTimezone({ targetEmail: email, company, role: lead.role });
 			await db.prepare(`
 				INSERT INTO outreach_lead 
-				(campaign_id, target_email, target_name, company, source, country, timezone, subject, body, status)
-				VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 'queued')
-			`).bind(campaignId, email, name, company, source, tzInfo.country, tzInfo.timezone).run();
+				(campaign_id, target_email, target_name, company, role, source, country, timezone, subject, body, status)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', 'queued')
+			`).bind(campaignId, email, name, company, lead.role || '', source, tzInfo.country, tzInfo.timezone).run();
 
 			addedLeads.push({ targetEmail: email, targetName: name, company, role: lead.role || '', source });
 		}
@@ -1745,7 +1745,8 @@ app.get('/outreach/leads', async (c) => {
 	const url = new URL(c.req.url);
 	const campaignId = url.searchParams.get('campaignId');
 	const status = url.searchParams.get('status');
-	const limit = parseInt(url.searchParams.get('limit') || '100', 10);
+	const search = url.searchParams.get('search');
+	const limit = parseInt(url.searchParams.get('limit') || '150', 10);
 
 	let query = `
 		SELECT l.*, c.name as campaign_name, c.type as campaign_type 
@@ -1762,6 +1763,11 @@ app.get('/outreach/leads', async (c) => {
 	if (status && status !== 'all') {
 		query += ` AND l.status = ?`;
 		params.push(status);
+	}
+	if (search && search.trim()) {
+		const s = `%${search.trim().toLowerCase()}%`;
+		query += ` AND (LOWER(l.target_email) LIKE ? OR LOWER(l.company) LIKE ? OR LOWER(l.target_name) LIKE ? OR LOWER(COALESCE(l.role, '')) LIKE ? OR LOWER(COALESCE(l.subject, '')) LIKE ? OR LOWER(COALESCE(l.sender_email, '')) LIKE ?)`;
+		params.push(s, s, s, s, s, s);
 	}
 
 	query += ` ORDER BY l.lead_id DESC LIMIT ?`;
