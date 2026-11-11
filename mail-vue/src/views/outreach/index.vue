@@ -250,6 +250,16 @@
           </button>
           <button 
             type="button" 
+            class="tab-nav-pill highlight-inbox" 
+            :class="{ active: activeTab === 'inbox' }" 
+            @click="activeTab = 'inbox'"
+          >
+            <Icon icon="fluent:mail-inbox-all-24-filled" width="18" height="18" />
+            <span>📬 Master Inbox</span>
+            <span v-if="unreadInboxCount > 0" class="inbox-pill-badge">{{ unreadInboxCount }}</span>
+          </button>
+          <button 
+            type="button" 
             class="tab-nav-pill" 
             :class="{ active: activeTab === 'job_hunting' }" 
             @click="activeTab = 'job_hunting'"
@@ -533,6 +543,221 @@
               </div>
             </div>
 
+          </el-tab-pane>
+
+
+          <!-- TAB 1.5: Master Inbox & Autonomous Reply Hub -->
+          <el-tab-pane label="📬 Master Inbox" name="inbox">
+            <div class="section-card">
+              <div class="section-header">
+                <div class="section-title">
+                  <Icon icon="fluent:mail-inbox-all-24-filled" width="22" height="22" style="color: #6366f1;" />
+                  <span>Master Inbox & Autonomous Inbound Reply Hub</span>
+                </div>
+                <div class="inbox-header-actions">
+                  <el-button size="small" :loading="loadingMasterInbox" @click="loadMasterInbox">
+                    <Icon icon="fluent:arrow-sync-20-regular" width="16" height="16" style="margin-right: 4px;" />
+                    Refresh Inbox
+                  </el-button>
+                  <el-button size="small" type="danger" plain :loading="purgingDead" @click="handlePurgeDeadLeads">
+                    <Icon icon="fluent:broom-20-regular" width="16" height="16" style="margin-right: 4px;" />
+                    Purge Dead Leads (MX Check)
+                  </el-button>
+                </div>
+              </div>
+
+              <!-- Top KPI Bar for Master Inbox -->
+              <div class="inbox-metrics-row">
+                <div class="inbox-kpi-pill">
+                  <span class="ik-label">Total Inbound</span>
+                  <span class="ik-value">{{ masterInboxTotal }}</span>
+                </div>
+                <div class="inbox-kpi-pill">
+                  <span class="ik-label">Unread Replies</span>
+                  <span class="ik-value unread">{{ unreadInboxCount }}</span>
+                </div>
+                <div class="inbox-kpi-pill">
+                  <span class="ik-label">Prospect Responses</span>
+                  <span class="ik-value prospect">{{ prospectRepliesCount }}</span>
+                </div>
+                <div class="inbox-kpi-pill">
+                  <span class="ik-label">Live Inboxes Monitored</span>
+                  <span class="ik-value">20 Senders (4 Domains)</span>
+                </div>
+              </div>
+
+              <!-- Filter Bar -->
+              <div class="inbox-filter-bar">
+                <el-input 
+                  v-model="inboxFilters.search" 
+                  placeholder="Search prospect, company, subject, or message text..." 
+                  clearable 
+                  size="default" 
+                  style="max-width: 380px;" 
+                  @input="handleInboxSearch"
+                >
+                  <template #prefix>
+                    <Icon icon="fluent:search-20-regular" />
+                  </template>
+                </el-input>
+
+                <el-select 
+                  v-model="inboxFilters.domain" 
+                  placeholder="Filter by Domain" 
+                  clearable 
+                  style="width: 220px;" 
+                  @change="loadMasterInbox"
+                >
+                  <el-option label="All Receiving Domains" value="" />
+                  <el-option label="technetocrat.org (Resend)" value="technetocrat.org" />
+                  <el-option label="swiftsuretech.com (Resend)" value="swiftsuretech.com" />
+                  <el-option label="nccwtech.com (Brevo)" value="nccwtech.com" />
+                  <el-option label="saiftechnology.com (Brevo)" value="saiftechnology.com" />
+                </el-select>
+
+                <div class="intent-chips">
+                  <button 
+                    type="button" 
+                    class="intent-chip" 
+                    :class="{ active: inboxFilters.intent === 'all' }" 
+                    @click="setIntentFilter('all')"
+                  >
+                    All Inbound
+                  </button>
+                  <button 
+                    type="button" 
+                    class="intent-chip" 
+                    :class="{ active: inboxFilters.intent === 'prospects' }" 
+                    @click="setIntentFilter('prospects')"
+                  >
+                    ⚡ Prospect Replies
+                  </button>
+                  <button 
+                    type="button" 
+                    class="intent-chip" 
+                    :class="{ active: inboxFilters.intent === 'interview' }" 
+                    @click="setIntentFilter('interview')"
+                  >
+                    📅 Interviews / Calls
+                  </button>
+                  <button 
+                    type="button" 
+                    class="intent-chip" 
+                    :class="{ active: inboxFilters.intent === 'ticket' }" 
+                    @click="setIntentFilter('ticket')"
+                  >
+                    🎫 Ticket / Careers Portals
+                  </button>
+                  <button 
+                    type="button" 
+                    class="intent-chip" 
+                    :class="{ active: inboxFilters.intent === 'interested' }" 
+                    @click="setIntentFilter('interested')"
+                  >
+                    💡 High Interest
+                  </button>
+                </div>
+              </div>
+
+              <!-- Inbound Messages Table -->
+              <el-table 
+                :data="filteredMasterInboxList" 
+                v-loading="loadingMasterInbox" 
+                style="width: 100%; margin-top: 14px;" 
+                stripe 
+                class="master-inbox-table"
+              >
+                <el-table-column label="Prospect / Sender" min-width="210">
+                  <template #default="{ row }">
+                    <div class="inbound-sender-cell">
+                      <div class="inbound-sender-name">
+                        <strong>{{ row.target_name || row.sender_name || row.send_email?.split('@')[0] }}</strong>
+                        <el-tag v-if="row.isProspect" size="small" type="success" effect="dark" style="margin-left: 6px;">
+                          PROSPECT
+                        </el-tag>
+                      </div>
+                      <div class="inbound-sender-email">{{ row.send_email }}</div>
+                      <div v-if="row.company" class="inbound-company-tag">
+                        🏢 {{ row.company }}
+                      </div>
+                    </div>
+                  </template>
+                </el-table-column>
+
+                <el-table-column label="Subject & Snippet" min-width="320">
+                  <template #default="{ row }">
+                    <div class="inbound-subject-cell" @click="openThread(row)">
+                      <div class="inbound-subject-text" :class="{ 'is-unread': row.email_status === 0 }">
+                        <span v-if="row.email_status === 0" class="unread-dot"></span>
+                        {{ row.subject || '(no subject)' }}
+                      </div>
+                      <div class="inbound-snippet">
+                        {{ row.text ? (row.text.length > 120 ? row.text.slice(0, 120) + '...' : row.text) : '(empty body)' }}
+                      </div>
+                      <div v-if="row.campaign_name" class="inbound-camp-name">
+                        Campaign: {{ row.campaign_name }}
+                      </div>
+                    </div>
+                  </template>
+                </el-table-column>
+
+                <el-table-column label="Intent & Classification" width="170" align="center">
+                  <template #default="{ row }">
+                    <el-tag 
+                      size="small" 
+                      :type="row.intent === 'interview' ? 'success' : (row.intent === 'ticket' ? 'warning' : (row.intent === 'interested' ? 'primary' : (row.intent === 'uninterested' ? 'danger' : 'info')))"
+                    >
+                      {{ 
+                        row.intent === 'interview' ? '📅 Interview / Call' :
+                        row.intent === 'ticket' ? '🎫 Careers Ticket' :
+                        row.intent === 'interested' ? '💡 High Interest' :
+                        row.intent === 'uninterested' ? '⛔ Uninterested' :
+                        (row.isProspect ? '💬 Prospect Reply' : '📩 Inbound')
+                      }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+
+                <el-table-column label="Receiving Mailbox" width="220">
+                  <template #default="{ row }">
+                    <div class="receiving-cell">
+                      <div class="receiving-email">{{ row.to_email }}</div>
+                      <el-tag size="small" effect="plain" type="info">
+                        {{ row.to_email?.split('@')[1] }}
+                      </el-tag>
+                    </div>
+                  </template>
+                </el-table-column>
+
+                <el-table-column label="Received At" width="160" align="center">
+                  <template #default="{ row }">
+                    <span class="inbox-time">{{ formatDate(row.create_time) }}</span>
+                  </template>
+                </el-table-column>
+
+                <el-table-column label="Action" width="140" align="center" fixed="right">
+                  <template #default="{ row }">
+                    <el-button size="small" type="primary" plain @click="openThread(row)">
+                      <Icon icon="fluent:chat-bubbles-question-16-regular" width="14" height="14" style="margin-right: 4px;" />
+                      View &amp; Reply
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+
+              <!-- Pagination -->
+              <div class="pagination-wrapper" style="margin-top: 16px; display: flex; justify-content: flex-end;">
+                <el-pagination 
+                  v-model:current-page="inboxFilters.page" 
+                  v-model:page-size="inboxFilters.size" 
+                  :total="masterInboxTotal" 
+                  :page-sizes="[15, 30, 50, 100]" 
+                  layout="total, sizes, prev, pager, next" 
+                  @size-change="loadMasterInbox" 
+                  @current-change="loadMasterInbox" 
+                />
+              </div>
+            </div>
           </el-tab-pane>
 
           <!-- TAB 2: Job Hunting Controls (Career-Ops) -->
@@ -1502,6 +1727,10 @@
                   </div>
 
                   <el-form label-position="top">
+                    <el-form-item label="Target Recipient Email (Optional — Performs Live MX Deliverability Check)">
+                      <el-input v-model="spamScanner.targetEmail" placeholder="e.g. alex@stripe.com (detects dead domains & verifies MX)" />
+                    </el-form-item>
+
                     <el-form-item label="Email Subject Line">
                       <el-input v-model="spamScanner.subject" placeholder="e.g. Quick question regarding technical bottleneck at Stripe" />
                     </el-form-item>
@@ -1517,7 +1746,7 @@
 
                     <el-button type="primary" :loading="spamScanner.analyzing" @click="runSpamCheck">
                       <Icon icon="fluent:shield-search-20-regular" width="16" height="16" style="margin-right: 6px;" />
-                      Scan Copy For Spam Triggers
+                      Scan Copy For Spam Triggers &amp; Predict Folder
                     </el-button>
                   </el-form>
 
@@ -1530,6 +1759,31 @@
                       <el-tag :type="spamScanner.result.level === 'clean' ? 'success' : (spamScanner.result.level === 'low_risk' ? 'info' : (spamScanner.result.level === 'moderate_risk' ? 'warning' : 'danger'))">
                         {{ spamScanner.result.level.replace('_', ' ').toUpperCase() }}
                       </el-tag>
+                    </div>
+
+                    <!-- Predicted Folder Placement Badge -->
+                    <div v-if="spamScanner.result.predictedFolder" class="folder-prediction-card" :class="'fpc-' + (spamScanner.result.folderClass || 'primary')">
+                      <div class="fpc-icon">
+                        <Icon :icon="spamScanner.result.folderClass === 'primary' ? 'fluent:checkmark-circle-24-filled' : (spamScanner.result.folderClass === 'promotions' ? 'fluent:tag-24-filled' : 'fluent:alert-24-filled')" width="24" height="24" />
+                      </div>
+                      <div class="fpc-details">
+                        <div class="fpc-title">Predicted ESP Folder Placement</div>
+                        <div class="fpc-status">
+                          <strong>{{ spamScanner.result.predictedFolder }}</strong>
+                          <span class="fpc-sub" v-if="spamScanner.result.folderClass === 'primary'"> — Will land in recipient's Primary Inbox view</span>
+                          <span class="fpc-sub" v-else-if="spamScanner.result.folderClass === 'promotions'"> — Filtered out of Primary inbox by ESP algorithms</span>
+                          <span class="fpc-sub" v-else> — High penalty detected; will be blocked or sent to Junk/Spam</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Target Recipient MX Check Status -->
+                    <div v-if="spamScanner.result.targetMxInfo" class="mx-check-status-box" :class="{ 'mx-pass': spamScanner.result.targetMxInfo.hasMx, 'mx-fail': !spamScanner.result.targetMxInfo.hasMx }">
+                      <Icon :icon="spamScanner.result.targetMxInfo.hasMx ? 'fluent:shield-checkmark-20-filled' : 'fluent:dismiss-circle-20-filled'" width="20" height="20" />
+                      <div>
+                        <strong>Target Domain MX: {{ spamScanner.result.targetMxInfo.domain }}</strong>
+                        <div style="font-size: 12.5px;">{{ spamScanner.result.targetMxInfo.status }}</div>
+                      </div>
                     </div>
 
                     <div v-if="spamScanner.result.detectedTriggers && spamScanner.result.detectedTriggers.length > 0" class="triggers-detected-box">
@@ -1828,6 +2082,123 @@
       </template>
     </el-dialog>
 
+    <!-- Dialog: Inbound Thread & AI Reply Composer -->
+    <el-dialog 
+      v-model="showThreadModal" 
+      title="Conversation Thread & AI Direct Reply" 
+      width="780px"
+      class="thread-dialog"
+      destroy-on-close
+    >
+      <div v-loading="loadingThread" class="thread-container">
+        <div v-if="selectedThread" class="thread-content-flow">
+          
+          <!-- Prospect Top Header Card -->
+          <div class="thread-header-card">
+            <div class="thc-info">
+              <div class="thc-name">
+                {{ selectedThread.matchedLead?.target_name || selectedThread.inbound?.name || selectedThread.inbound?.send_email }}
+                <el-tag v-if="selectedThread.matchedLead" size="small" type="success" effect="dark" style="margin-left: 8px;">PROSPECT LEAD</el-tag>
+              </div>
+              <div class="thc-company" v-if="selectedThread.matchedLead?.company">
+                🏢 Company: <strong>{{ selectedThread.matchedLead.company }}</strong>
+                <span v-if="selectedThread.matchedLead.campaign_name" style="margin-left: 12px; color: #64748b;">
+                  ({{ selectedThread.matchedLead.campaign_name }})
+                </span>
+              </div>
+              <div class="thc-meta-row">
+                <span>Sender: <code>{{ selectedThread.inbound?.send_email }}</code></span>
+                <span style="margin-left: 16px;">Receiving Mailbox: <code>{{ selectedThread.inbound?.to_email }}</code></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Original Outbound Pitch Card (if matched lead) -->
+          <div v-if="selectedThread.originalOutbound" class="thread-message-card outbound">
+            <div class="tmc-header">
+              <div class="tmc-title">
+                <Icon icon="fluent:send-16-filled" width="16" height="16" style="color: #6366f1;" />
+                <span>Original Outbound Pitch by Tasin Sohad</span>
+              </div>
+              <div class="tmc-time">{{ formatDate(selectedThread.originalOutbound.sentTime) }}</div>
+            </div>
+            <div class="tmc-subject">Subject: {{ selectedThread.originalOutbound.subject }}</div>
+            <div class="tmc-body whitespace-pre">{{ selectedThread.originalOutbound.body }}</div>
+          </div>
+
+          <!-- Inbound Prospect Reply Card -->
+          <div class="thread-message-card inbound">
+            <div class="tmc-header">
+              <div class="tmc-title">
+                <Icon icon="fluent:mail-arrow-down-16-filled" width="16" height="16" style="color: #10b981;" />
+                <span>Inbound Message from {{ selectedThread.inbound?.send_email }}</span>
+              </div>
+              <div class="tmc-time">{{ formatDate(selectedThread.inbound?.create_time) }}</div>
+            </div>
+            <div class="tmc-subject">Subject: {{ selectedThread.inbound?.subject }}</div>
+            <div class="tmc-body whitespace-pre">{{ selectedThread.inbound?.text || '(no plain text body)' }}</div>
+          </div>
+
+          <!-- Direct AI Reply Composer -->
+          <div class="ai-reply-composer-box">
+            <div class="arc-header">
+              <div class="arc-title">
+                <Icon icon="fluent:bot-sparkle-20-filled" width="20" height="20" style="color: #6366f1;" />
+                <span>Compose Direct Response</span>
+              </div>
+              <el-button 
+                type="primary" 
+                size="small" 
+                plain 
+                :loading="draftingAi" 
+                @click="handleDraftAiReply"
+              >
+                <Icon icon="fluent:sparkle-16-filled" width="14" height="14" style="margin-right: 4px;" />
+                ✨ Auto-Draft Response with LLM
+              </el-button>
+            </div>
+
+            <el-form label-position="top" style="margin-top: 12px;">
+              <div class="form-row">
+                <el-form-item label="From (Sending Mailbox)" class="flex-1">
+                  <el-input :model-value="replyForm.fromEmail" disabled />
+                </el-form-item>
+                <el-form-item label="To (Recipient)" class="flex-1">
+                  <el-input :model-value="replyForm.toEmail" disabled />
+                </el-form-item>
+              </div>
+
+              <el-form-item label="Reply Subject Line">
+                <el-input v-model="replyForm.subject" placeholder="Re: ..." />
+              </el-form-item>
+
+              <el-form-item label="Reply Body (Sent as Tasin Sohad)">
+                <el-input 
+                  v-model="replyForm.text" 
+                  type="textarea" 
+                  :rows="7" 
+                  placeholder="Write your personal response or click Auto-Draft above..." 
+                />
+              </el-form-item>
+
+              <div class="arc-footer" style="display: flex; justify-content: flex-end; gap: 10px;">
+                <el-button @click="showThreadModal = false">Cancel</el-button>
+                <el-button 
+                  type="success" 
+                  :loading="sendingReply" 
+                  @click="handleSendReply"
+                >
+                  <Icon icon="fluent:send-20-filled" width="16" height="16" style="margin-right: 4px;" />
+                  Send Reply from {{ replyForm.fromEmail }}
+                </el-button>
+              </div>
+            </el-form>
+          </div>
+
+        </div>
+      </div>
+    </el-dialog>
+
   </div>
 </template>
 
@@ -1866,7 +2237,12 @@ import {
   runAutoModeCycleNow,
   getDeliverabilityHealth,
   checkEmailSpam,
-  sendDeliverabilityTest
+  sendDeliverabilityTest,
+  getMasterInbox,
+  getInboxThread,
+  sendInboxReply,
+  draftAiReply,
+  purgeDeadLeads
 } from '@/request/outreach.js';
 
 const route = useRoute();
@@ -1884,6 +2260,9 @@ watch(activeTab, (newTab) => {
   if (route.query.tab !== newTab) {
     router.replace({ query: { ...route.query, tab: newTab } });
   }
+  if (newTab === 'inbox') {
+    loadMasterInbox();
+  }
 });
 const loading = ref(false);
 const loadingLeads = ref(false);
@@ -1895,6 +2274,172 @@ const savingJobControls = ref(false);
 const savingHarveyControls = ref(false);
 const fetchingModels = ref(false);
 const savingLlm = ref(false);
+
+// Master Inbox Hub State
+const unreadInboxCount = ref(0);
+const masterInboxList = ref([]);
+const masterInboxTotal = ref(0);
+const prospectRepliesCount = ref(0);
+const loadingMasterInbox = ref(false);
+const inboxFilters = reactive({
+  page: 1,
+  size: 20,
+  domain: '',
+  search: '',
+  intent: 'all'
+});
+
+const showThreadModal = ref(false);
+const selectedThread = ref(null);
+const loadingThread = ref(false);
+const replyForm = reactive({
+  emailId: null,
+  toEmail: '',
+  fromEmail: '',
+  subject: '',
+  text: ''
+});
+const sendingReply = ref(false);
+const draftingAi = ref(false);
+const purgingDead = ref(false);
+
+const filteredMasterInboxList = computed(() => {
+  if (inboxFilters.intent === 'all') return masterInboxList.value;
+  if (inboxFilters.intent === 'prospects') return masterInboxList.value.filter(i => i.isProspect);
+  return masterInboxList.value.filter(i => i.intent === inboxFilters.intent);
+});
+
+async function loadMasterInbox() {
+  loadingMasterInbox.value = true;
+  try {
+    const res = await getMasterInbox({
+      page: inboxFilters.page,
+      size: inboxFilters.size,
+      domain: inboxFilters.domain || undefined,
+      search: inboxFilters.search || undefined
+    });
+    const d = res?.data || res;
+    if (d) {
+      masterInboxList.value = d.items || [];
+      masterInboxTotal.value = d.total || 0;
+      unreadInboxCount.value = d.unread || 0;
+      prospectRepliesCount.value = d.prospectReplies || 0;
+    }
+  } catch (err) {
+    ElMessage.error(err.message || 'Failed to fetch master inbox');
+  } finally {
+    loadingMasterInbox.value = false;
+  }
+}
+
+let inboxSearchTimeout = null;
+function handleInboxSearch() {
+  clearTimeout(inboxSearchTimeout);
+  inboxSearchTimeout = setTimeout(() => {
+    inboxFilters.page = 1;
+    loadMasterInbox();
+  }, 350);
+}
+
+function setIntentFilter(intent) {
+  inboxFilters.intent = intent;
+}
+
+async function openThread(row) {
+  showThreadModal.value = true;
+  loadingThread.value = true;
+  selectedThread.value = null;
+  try {
+    const res = await getInboxThread(row.email_id);
+    const d = res?.data || res;
+    selectedThread.value = d;
+    
+    // Setup reply form defaults
+    replyForm.emailId = row.email_id;
+    replyForm.toEmail = row.send_email;
+    replyForm.fromEmail = row.to_email;
+    replyForm.subject = row.subject?.startsWith('Re:') ? row.subject : `Re: ${row.subject || 'Follow-up'}`;
+    replyForm.text = '';
+
+    // Mark as read locally and decrement unread if positive
+    row.email_status = 1;
+    if (unreadInboxCount.value > 0) unreadInboxCount.value--;
+  } catch (err) {
+    ElMessage.error(err.message || 'Failed to load thread');
+  } finally {
+    loadingThread.value = false;
+  }
+}
+
+async function handleDraftAiReply() {
+  if (!selectedThread.value) return;
+  draftingAi.value = true;
+  try {
+    const res = await draftAiReply({
+      prospectEmail: replyForm.toEmail,
+      prospectMessage: selectedThread.value.inbound?.text || '',
+      company: selectedThread.value.matchedLead?.company || '',
+      subject: replyForm.subject
+    });
+    const d = res?.data || res;
+    if (d?.reply) {
+      replyForm.text = d.reply;
+      ElMessage.success('Contextual AI response drafted by LLM!');
+    }
+  } catch (err) {
+    ElMessage.error(err.message || 'Failed to draft AI response');
+  } finally {
+    draftingAi.value = false;
+  }
+}
+
+async function handleSendReply() {
+  if (!replyForm.text || !replyForm.text.trim()) {
+    return ElMessage.warning('Please enter reply text before sending');
+  }
+  sendingReply.value = true;
+  try {
+    await sendInboxReply({
+      emailId: replyForm.emailId,
+      toEmail: replyForm.toEmail,
+      subject: replyForm.subject,
+      text: replyForm.text
+    });
+    ElMessage.success(`Reply successfully dispatched from ${replyForm.fromEmail}!`);
+    showThreadModal.value = false;
+    await loadMasterInbox();
+    await fetchData();
+  } catch (err) {
+    ElMessage.error(err.message || 'Failed to dispatch reply');
+  } finally {
+    sendingReply.value = false;
+  }
+}
+
+async function handlePurgeDeadLeads() {
+  try {
+    await ElMessageBox.confirm(
+      'This will perform live MX DNS checks on all queued leads across both campaigns and permanently remove any addresses belonging to dead, inactive, or non-existent domains. Continue?',
+      'Purge Dead Leads',
+      { confirmButtonText: 'Verify & Purge', cancelButtonText: 'Cancel', type: 'warning' }
+    );
+  } catch {
+    return;
+  }
+
+  purgingDead.value = true;
+  try {
+    const res = await purgeDeadLeads();
+    const d = res?.data || res;
+    ElMessage.success(d?.message || 'Dead leads purged successfully');
+    await fetchData();
+    await loadLeads();
+  } catch (err) {
+    ElMessage.error(err.message || 'Failed to purge dead leads');
+  } finally {
+    purgingDead.value = false;
+  }
+}
 
 const autoPilotEnabled = ref(false);
 const togglingAutoPilot = ref(false);
@@ -2143,6 +2688,7 @@ async function loadDeliverabilityHealth(isManual = true) {
 const spamScanner = reactive({
   subject: '',
   body: '',
+  targetEmail: '',
   analyzing: false,
   result: null
 });
@@ -2151,9 +2697,11 @@ function loadSampleForSpamCheck(type) {
   if (type === 'job') {
     spamScanner.subject = 'Autonomous AI & Full-Stack Systems: Tasin Sohad for Engineering';
     spamScanner.body = `Hi Alex,\n\nSaw Stripe is scaling edge compute workflows. At Technetocrat, I engineered autonomous multi-agent pipelines with Cloudflare Workers and sub-100ms latency.\n\nWould you be open to a 2-minute demo of the system architecture this Thursday?\n\nBest,\nTasin Sohad`;
+    spamScanner.targetEmail = 'engineering@stripe.com';
   } else {
     spamScanner.subject = 'Quick question regarding technical bottleneck at Stripe';
     spamScanner.body = `Hi Alex,\n\nNoticed Stripe is accelerating distributed data orchestration. We recently resolved similar distributed sync bottlenecks for an enterprise client, slashing query latency by 45%.\n\nWorth a 2-bullet breakdown of how we tackled this?\n\nBest,\nTasin Sohad`;
+    spamScanner.targetEmail = 'founders@stripe.com';
   }
   runSpamCheck();
 }
@@ -2164,7 +2712,11 @@ async function runSpamCheck() {
   }
   spamScanner.analyzing = true;
   try {
-    const res = await checkEmailSpam({ subject: spamScanner.subject, body: spamScanner.body });
+    const res = await checkEmailSpam({ 
+      subject: spamScanner.subject, 
+      body: spamScanner.body, 
+      targetEmail: spamScanner.targetEmail 
+    });
     spamScanner.result = res?.data || res;
     ElMessage.success('Pre-flight spam analysis complete!');
   } catch (err) {
@@ -2394,6 +2946,9 @@ async function fetchData() {
         autoModeEnabled.value = Boolean(data.automode.enabled);
         Object.assign(autoModeConfig, data.automode.config || {});
         autoModeLastRun.value = data.automode.lastRun;
+      }
+      if (typeof data.unreadInboxCount === 'number') {
+        unreadInboxCount.value = data.unreadInboxCount;
       }
       Object.assign(stats, data.stats || {});
       if (data.deliverability) {
@@ -2850,6 +3405,9 @@ function formatDate(dateStr) {
 
 onMounted(async () => {
   await Promise.all([fetchData(), loadLeads()]);
+  if (activeTab.value === 'inbox') {
+    loadMasterInbox();
+  }
 });
 </script>
 
@@ -5054,4 +5612,393 @@ onMounted(async () => {
   font-weight: 700;
   color: #0f172a;
 }
+
+/* Master Inbox & Folder Placement Styles */
+.highlight-inbox {
+  background: linear-gradient(135deg, #eef2ff 0%, #ede9fe 100%) !important;
+  border-color: #c7d2fe !important;
+  color: #4f46e5 !important;
+  font-weight: 600;
+}
+
+.highlight-inbox:hover,
+.highlight-inbox.active {
+  background: #6366f1 !important;
+  border-color: #6366f1 !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3) !important;
+}
+
+.inbox-pill-badge {
+  background: #ef4444;
+  color: white;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  margin-left: 6px;
+}
+
+.inbox-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.inbox-metrics-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  margin-bottom: 16px;
+}
+
+.inbox-kpi-pill {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 140px;
+}
+
+.ik-label {
+  font-size: 11.5px;
+  color: #64748b;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.ik-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.ik-value.unread {
+  color: #ef4444;
+}
+
+.ik-value.prospect {
+  color: #059669;
+}
+
+.inbox-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: #ffffff;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+
+.intent-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.intent-chip {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.intent-chip:hover {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.intent-chip.active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.inbound-sender-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inbound-sender-name {
+  font-size: 14px;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+}
+
+.inbound-sender-email {
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+.inbound-company-tag {
+  font-size: 11.5px;
+  color: #3b82f6;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.inbound-subject-cell {
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.inbound-subject-cell:hover .inbound-subject-text {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.inbound-subject-text {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inbound-subject-text.is-unread {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2563eb;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.inbound-snippet {
+  font-size: 12.5px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.inbound-camp-name {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.receiving-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.receiving-email {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.inbox-time {
+  font-size: 12px;
+  color: #64748b;
+}
+
+/* Thread Modal */
+.thread-container {
+  min-height: 300px;
+}
+
+.thread-content-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.thread-header-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+
+.thc-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+}
+
+.thc-company {
+  font-size: 13.5px;
+  color: #334155;
+  margin-top: 4px;
+}
+
+.thc-meta-row {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 6px;
+}
+
+.thread-message-card {
+  border-radius: 10px;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+}
+
+.thread-message-card.outbound {
+  background: #fdfdfe;
+  border-left: 4px solid #6366f1;
+}
+
+.thread-message-card.inbound {
+  background: #f0fdf4;
+  border-left: 4px solid #10b981;
+}
+
+.tmc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.tmc-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.tmc-time {
+  font-size: 11.5px;
+  color: #94a3b8;
+}
+
+.tmc-subject {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #0f172a;
+  margin-bottom: 8px;
+}
+
+.tmc-body {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #334155;
+}
+
+.whitespace-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-reply-composer-box {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+.arc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed #e2e8f0;
+}
+
+.arc-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+/* Folder Placement and MX Status Styles */
+.folder-prediction-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  margin-top: 14px;
+}
+
+.fpc-primary {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+}
+
+.fpc-promotions {
+  background: #fefce8;
+  border: 1px solid #fef08a;
+  color: #854d0e;
+}
+
+.fpc-spam {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.fpc-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  opacity: 0.85;
+}
+
+.fpc-status {
+  font-size: 14.5px;
+  margin-top: 2px;
+}
+
+.fpc-sub {
+  font-size: 12.5px;
+  opacity: 0.9;
+}
+
+.mx-check-status-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-top: 10px;
+}
+
+.mx-check-status-box.mx-pass {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.mx-check-status-box.mx-fail {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
 </style>

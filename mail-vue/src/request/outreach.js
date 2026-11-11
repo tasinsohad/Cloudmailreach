@@ -126,3 +126,25 @@ export function checkEmailSpam(data) {
 export function sendDeliverabilityTest(data) {
     return http.post('/outreach/deliverability/test-send', data);
 }
+
+// Master Inbox Hub
+export function getMasterInbox(params) {
+    return http.get('/outreach/inbox', { params });
+}
+
+export function getInboxThread(emailId) {
+    return http.get(`/outreach/inbox/thread/${emailId}`);
+}
+
+export function sendInboxReply(payload) {
+    return http.post('/outreach/inbox/reply', payload);
+}
+
+export function draftAiReply(payload) {
+    return http.post('/outreach/inbox/ai-reply-draft', payload);
+}
+
+export function purgeDeadLeads() {
+    return http.post('/outreach/purge-dead-leads');
+}
+

@@ -399,7 +399,7 @@ export async function generateAutonomousEmail(c, lead, campaignSettings = {}, ca
 	if (campaignType === 'job_hunting') {
 		const roles = campaignSettings.targetRoles || 'Senior Full-Stack Engineer / AI Solutions Architect';
 		const portfolio = campaignSettings.portfolioUrl || 'github.com/tasinsohad | linkedin.com/in/tasinsohad';
-		const resume = campaignSettings.resumeUrl || 'https://drive.google.com/file/d/1jVtmUEEYGtgmsMp0jGzZQX0QslTVGX4a/view?usp=sharing';
+		const resume = '';
 		const pitch = campaignSettings.pitchFocus || 'I build autonomous AI agents and production web applications with vibe coding and AI toolchains, shipping systems in days.';
 
 		if (customSystemPrompt && customSystemPrompt.trim()) {
@@ -431,7 +431,6 @@ IMPORTANT: Output your entire response ONLY as a valid JSON object: {"subject": 
 		userPrompt = `Recipient: ${targetName} at ${company}.
 Target Roles: ${roles}
 Portfolio: ${portfolio}
-Resume Link: ${resume}
 Value Proposition: ${pitch}
 Draft a warm, sharp message asking if they are exploring senior engineers/builders with strong AI delivery speed. Output JSON only.`;
 	} else {
@@ -466,7 +465,6 @@ IMPORTANT: Output your entire response ONLY as a valid JSON object: {"subject": 
 		}
 		userPrompt = `Prospect: ${targetName} at ${company} (ICP: ${icp}).
 Offering: ${offering}
-Booking/Review Link: ${booking}
 Draft a high-conversion, professional cold email proposing a brief 10-minute discovery call to see if offloading AI workflow pipelines makes sense. Output JSON only.`;
 	}
 
@@ -612,8 +610,130 @@ Draft a high-conversion, professional cold email proposing a brief 10-minute dis
 }
 
 // -----------------------------------------------------------------------------------------
-// Autonomous AI Opportunity Scout (Career-Ops & Harvey)
-// Discovers high-match job opportunities and B2B client prospects without requiring manual lead lists
+// -----------------------------------------------------------------------------------------
+// Live MX Domain Validation via Cloudflare DNS-over-HTTPS
+// -----------------------------------------------------------------------------------------
+export async function verifyDomainMx(domain) {
+	if (!domain || !domain.includes('.')) return false;
+	const cleanDomain = domain.toLowerCase().trim();
+	if (['gmail.com', 'google.com', 'outlook.com', 'microsoft.com', 'yahoo.com', 'apple.com', 'meta.com', 'stripe.com', 'cursor.com'].includes(cleanDomain)) {
+		return true;
+	}
+	try {
+		const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${cleanDomain}&type=MX`, {
+			headers: { 'Accept': 'application/dns-json' }
+		});
+		if (res.ok) {
+			const data = await res.json();
+			return Array.isArray(data.Answer) && data.Answer.some(a => a.type === 15);
+		}
+	} catch (e) {}
+	return false;
+}
+
+// -----------------------------------------------------------------------------------------
+// Real-World Live Job Discovery Engine (Jobicy, RemoteOK, Hacker News "Who is Hiring")
+// -----------------------------------------------------------------------------------------
+export async function fetchRealLiveJobs() {
+	const realJobs = [];
+
+	// Source 1: Hacker News "Who is Hiring" Live Monthly Thread
+	try {
+		const userRes = await fetch('https://hacker-news.firebaseio.com/v0/user/whoishiring.json');
+		if (userRes.ok) {
+			const user = await userRes.json();
+			const latestPostId = user.submitted?.[0];
+			if (latestPostId) {
+				const postRes = await fetch(`https://hacker-news.firebaseio.com/v0/item/${latestPostId}.json`);
+				const post = await postRes.json();
+				const kids = (post.kids || []).slice(0, 35);
+				for (const kid of kids) {
+					try {
+						const commentRes = await fetch(`https://hacker-news.firebaseio.com/v0/item/${kid}.json`);
+						const c = await commentRes.json();
+						const text = (c.text || '').replace(/<[^>]+>/g, ' ');
+						const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}))/);
+						if (emailMatch) {
+							const email = emailMatch[1].toLowerCase();
+							const domain = emailMatch[2].toLowerCase();
+							const firstLine = text.split('\n')[0] || '';
+							const companyMatch = firstLine.split('|')[0] || '';
+							const company = companyMatch.trim().slice(0, 40) || domain.split('.')[0];
+							realJobs.push({
+								targetEmail: email,
+								targetName: 'Hiring Team',
+								company: company,
+								role: 'Senior Software / AI Engineer',
+								source: 'hn_whoishiring'
+							});
+						}
+					} catch {}
+				}
+			}
+		}
+	} catch (e) {
+		console.warn('[Real Job Scout] HN feed error:', e.message);
+	}
+
+	// Source 2: Jobicy Remote Engineering Jobs API
+	try {
+		const jRes = await fetch('https://jobicy.com/api/v2/remote-jobs?count=25&industry=engineering');
+		if (jRes.ok) {
+			const jData = await jRes.json();
+			for (const item of (jData.jobs || [])) {
+				const company = item.companyName;
+				const role = item.jobTitle;
+				if (company) {
+					const cleanComp = company.toLowerCase().replace(/[^a-z0-9]/g, '');
+					realJobs.push({
+						targetEmail: `careers@${cleanComp}.com`,
+						targetName: `${company} Talent Team`,
+						company: company,
+						role: role,
+						source: 'jobicy',
+						jobUrl: item.url
+					});
+				}
+			}
+		}
+	} catch (e) {
+		console.warn('[Real Job Scout] Jobicy error:', e.message);
+	}
+
+	// Source 3: RemoteOK API
+	try {
+		const rRes = await fetch('https://remoteok.com/api', {
+			headers: { 'User-Agent': 'CloudMailreach/1.0' }
+		});
+		if (rRes.ok) {
+			const rData = await rRes.json();
+			const devJobs = (Array.isArray(rData) ? rData : []).filter(j => j.id && j.company).slice(0, 20);
+			for (const item of devJobs) {
+				const company = item.company;
+				const role = item.position;
+				if (company) {
+					const cleanComp = company.toLowerCase().replace(/[^a-z0-9]/g, '');
+					realJobs.push({
+						targetEmail: `jobs@${cleanComp}.com`,
+						targetName: `${company} Hiring`,
+						company: company,
+						role: role,
+						source: 'remote_ok',
+						jobUrl: item.url
+					});
+				}
+			}
+		}
+	} catch (e) {
+		console.warn('[Real Job Scout] RemoteOK error:', e.message);
+	}
+
+	return realJobs;
+}
+
+// -----------------------------------------------------------------------------------------
+// Autonomous AI & Real-World Opportunity Scout (Career-Ops & Harvey)
+// Discovers verified, live hiring opportunities and B2B clients with mandatory MX validation
 // -----------------------------------------------------------------------------------------
 export async function scoutOpportunities(c, type = 'service_outreach', count = 20, isDeep = true) {
 	const db = c.env.db;
@@ -630,135 +750,28 @@ export async function scoutOpportunities(c, type = 'service_outreach', count = 2
 	}
 	const campaignId = camp?.campaign_id || (campaignType === 'job_hunting' ? 1 : 2);
 
-	let systemPrompt = '';
-	let userPrompt = '';
-
-	if (campaignType === 'job_hunting') {
-		const roles = settings.targetRoles || 'Senior Full-Stack Engineer, AI Solutions Architect, AI Agent Developer, Vibe Coder';
-		const regions = settings.targetRegions || 'US Remote, EU Remote, Global Remote';
-		systemPrompt = `You are Career-Ops Deep Opportunity Scout.
-Your role is to conduct a DEEP search across the tech ecosystem to discover as many high-value hiring opportunities as possible for technical roles.
-Output strictly valid JSON matching this schema:
-{
-  "leads": [
-    {
-      "targetEmail": "recruiter@company.com or talent@company.com or careers@company.com or founder@company.com",
-      "targetName": "Contact Name or Hiring Team",
-      "company": "Company Name",
-      "role": "Target Role Title",
-      "source": "career_ops"
-    }
-  ]
-}
-Generate as many distinct target leads as possible (up to ${count}). Provide diverse, high-growth companies across AI, developer tooling, and modern SaaS.`;
-
-		userPrompt = `Deep Search Target Roles: ${roles}
-Target Regions: ${regions}
-Perform an exhaustive discovery scan. Find up to ${count} tech companies currently hiring builders and engineers, identify their talent/engineering contact email, and output valid JSON.`;
-	} else {
-		const icp = settings.icpIndustries || 'B2B SaaS, Logistics & Supply Chain, Healthcare Tech, FinTech, E-commerce Tech';
-		const titles = settings.targetTitles || 'CTO, VP Engineering, Head of AI, Founder & CEO, Director of Technology';
-		const companySizes = settings.companySizes || '15-500 employees';
-		systemPrompt = `You are Harvey, an autonomous B2B client acquisition deep prospector.
-Your role is to conduct a DEEP search across B2B companies with engineering backlogs and operational drag that benefit from AI integrations and automated systems.
-Output strictly valid JSON matching this schema:
-{
-  "leads": [
-    {
-      "targetEmail": "decisionmaker@company.com",
-      "targetName": "Decision Maker Name",
-      "company": "Company Name",
-      "role": "Title (e.g. CTO, VP of Eng, Founder)",
-      "source": "harvey"
-    }
-  ]
-}
-Generate as many distinct target leads as possible (up to ${count}). Ensure diverse companies across B2B software, logistics, and platforms.`;
-
-		userPrompt = `Deep Search Target ICP: ${icp}
-Decision Maker Personas: ${titles}
-Company Sizes: ${companySizes}
-Perform an exhaustive B2B market discovery scan. Find up to ${count} high-growth companies with operational backlogs, identify their technical leader contact email, and output valid JSON.`;
-	}
-
-	// Fetch active LLM configs for failover execution
-	let activeLlms = [];
-	try {
-		const rows = await db.prepare(
-			`SELECT * FROM llm_config WHERE is_active = 1 ORDER BY priority ASC, config_id ASC`
-		).all();
-		activeLlms = rows?.results || [];
-	} catch (e) {}
-
 	let scoutedLeads = [];
-	for (const llm of activeLlms) {
-		const key = (llm.api_key || '').trim();
-		if (!key && llm.provider !== 'custom') continue;
 
-		const candidateModels = getProviderCandidateModels(llm.provider, llm.selected_model);
-
-		for (const mName of candidateModels) {
-			try {
-				const text = await executeProviderChat(
-					llm.provider,
-					key,
-					llm.base_url,
-					mName,
-					systemPrompt,
-					userPrompt,
-					18000
-				);
-				const clean = (text || '').replace(new RegExp('```json', 'gi'), '').replace(new RegExp('```', 'g'), '').trim();
-				const parsed = JSON.parse(clean);
-				if (parsed && Array.isArray(parsed.leads) && parsed.leads.length > 0) {
-					scoutedLeads = parsed.leads;
-					break; // model loop
-				}
-			} catch (err) {
-				console.warn(`[Deep Scout Engine] Model "${mName}" on ${llm.provider} failed: ${err.message}. Trying next candidate model...`);
+	// For Career-Ops: fetch REAL live postings from Jobicy, RemoteOK, and Hacker News
+	if (campaignType === 'job_hunting') {
+		try {
+			const liveJobs = await fetchRealLiveJobs();
+			if (liveJobs.length > 0) {
+				scoutedLeads.push(...liveJobs);
+				console.log(`[Real Job Scout] Discovered ${liveJobs.length} real live job postings across HN, Jobicy, and RemoteOK.`);
 			}
-		}
-
-		if (scoutedLeads.length > 0) {
-			break; // provider loop
+		} catch (liveErr) {
+			console.warn('[Real Job Scout] Live feeds failed, falling back to verified seed intelligence:', liveErr.message);
 		}
 	}
 
-	// Built-in Workers AI Fallback with multiple models
-	if (scoutedLeads.length === 0 && c.env?.ai) {
-		const cfModels = [
-			'@cf/meta/llama-3.1-8b-instruct-fast',
-			'@cf/meta/llama-3.1-70b-instruct',
-			'@cf/mistral/mistral-7b-instruct-v0.2'
-		];
-		for (const cfModel of cfModels) {
-			try {
-				const aiResp = await c.env.ai.run(cfModel, {
-					messages: [
-						{ role: 'system', content: systemPrompt },
-						{ role: 'user', content: userPrompt }
-					],
-					max_tokens: 1200
-				});
-				const clean = ((aiResp?.response) || '').replace(new RegExp('```json', 'gi'), '').replace(new RegExp('```', 'g'), '').trim();
-				const parsed = JSON.parse(clean);
-				if (parsed && Array.isArray(parsed.leads) && parsed.leads.length > 0) {
-					scoutedLeads = parsed.leads;
-					break;
-				}
-			} catch (cfErr) {
-				console.warn(`[Deep Scout Engine] Cloudflare AI model "${cfModel}" fallback failed:`, cfErr.message);
-			}
-		}
-	}
-
-	// Curated Deep Market Intelligence Seed Banks (30+ verified targets per engine)
+	// Curated Deep Market Intelligence Seed Banks (Verified tech companies with active mail servers)
 	const deepJobReservoir = [
-		{ targetEmail: 'talent@modal.com', targetName: 'Modal Talent Team', company: 'Modal Labs', role: 'AI Cloud Engineer', source: 'career_ops' },
-		{ targetEmail: 'careers@langchain.dev', targetName: 'LangChain Recruiting', company: 'LangChain', role: 'Agent Systems Engineer', source: 'career_ops' },
+		{ targetEmail: 'talent@modal.com', targetName: 'Modal Talent Team', company: 'Modal Labs', role: 'AI Cloud Systems Engineer', source: 'career_ops' },
+		{ targetEmail: 'careers@langchain.dev', targetName: 'LangChain Recruiting', company: 'LangChain', role: 'Autonomous Agent Engineer', source: 'career_ops' },
 		{ targetEmail: 'jobs@replicate.com', targetName: 'Replicate Team', company: 'Replicate', role: 'Full-Stack Model Integrations', source: 'career_ops' },
 		{ targetEmail: 'hiring@vapi.ai', targetName: 'Vapi AI Team', company: 'Vapi', role: 'Voice AI Infrastructure Engineer', source: 'career_ops' },
-		{ targetEmail: 'jobs@cerebras.net', targetName: 'Cerebras Recruiting', company: 'Cerebras Systems', role: 'AI Inference Solutions Engineer', source: 'career_ops' },
+		{ targetEmail: 'jobs@cerebras.net', targetName: 'Cerebras Recruiting', company: 'Cerebras Systems', role: 'AI Inference Systems Engineer', source: 'career_ops' },
 		{ targetEmail: 'talent@posthog.com', targetName: 'PostHog Talent', company: 'PostHog', role: 'Full-Stack Product Engineer', source: 'career_ops' },
 		{ targetEmail: 'careers@supabase.com', targetName: 'Supabase Hiring', company: 'Supabase', role: 'Developer Platform Engineer', source: 'career_ops' },
 		{ targetEmail: 'jobs@together.ai', targetName: 'Together AI Talent', company: 'Together AI', role: 'LLM Systems Engineer', source: 'career_ops' },
@@ -769,18 +782,13 @@ Perform an exhaustive B2B market discovery scan. Find up to ${count} high-growth
 		{ targetEmail: 'talent@mistral.ai', targetName: 'Mistral AI Team', company: 'Mistral AI', role: 'AI Developer Platform Engineer', source: 'career_ops' },
 		{ targetEmail: 'jobs@runpod.io', targetName: 'RunPod Hiring', company: 'RunPod', role: 'GPU Cloud Software Engineer', source: 'career_ops' },
 		{ targetEmail: 'hiring@groq.com', targetName: 'Groq Talent Team', company: 'Groq', role: 'LPU Cloud Solutions Engineer', source: 'career_ops' },
-		{ targetEmail: 'careers@fireworks.ai', targetName: 'Fireworks AI People', company: 'Fireworks AI', role: 'Model Serving Infrastructure Engineer', source: 'career_ops' },
-		{ targetEmail: 'jobs@lightning.ai', targetName: 'Lightning AI Team', company: 'Lightning AI', role: 'AI Platform Solutions Engineer', source: 'career_ops' },
-		{ targetEmail: 'talent@scale.com', targetName: 'Scale AI Recruiting', company: 'Scale AI', role: 'Full-Stack Generative AI Engineer', source: 'career_ops' },
-		{ targetEmail: 'careers@bland.ai', targetName: 'Bland AI Team', company: 'Bland AI', role: 'Autonomous Voice Agent Engineer', source: 'career_ops' },
-		{ targetEmail: 'jobs@decagon.ai', targetName: 'Decagon Hiring', company: 'Decagon', role: 'Enterprise AI Agent Architect', source: 'career_ops' }
+		{ targetEmail: 'careers@fireworks.ai', targetName: 'Fireworks AI People', company: 'Fireworks AI', role: 'Model Serving Infrastructure Engineer', source: 'career_ops' }
 	];
 
 	const deepClientReservoir = [
 		{ targetEmail: 'engineering@resend.com', targetName: 'Zeno Rocha', company: 'Resend', role: 'VP Engineering', source: 'harvey' },
 		{ targetEmail: 'founders@cal.com', targetName: 'Peer Richelsen', company: 'Cal.com', role: 'Co-Founder', source: 'harvey' },
 		{ targetEmail: 'product@dub.co', targetName: 'Steven Tey', company: 'Dub.co', role: 'Founder & CEO', source: 'harvey' },
-		{ targetEmail: 'tech@papermark.io', targetName: 'Marc Louvion', company: 'Papermark', role: 'Founder', source: 'harvey' },
 		{ targetEmail: 'team@mintlify.com', targetName: 'Han Wang', company: 'Mintlify', role: 'Founder & CEO', source: 'harvey' },
 		{ targetEmail: 'founders@trigger.dev', targetName: 'Matt Aitken', company: 'Trigger.dev', role: 'Founder', source: 'harvey' },
 		{ targetEmail: 'engineering@inngest.com', targetName: 'Dan Farrelly', company: 'Inngest', role: 'CTO', source: 'harvey' },
@@ -799,7 +807,6 @@ Perform an exhaustive B2B market discovery scan. Find up to ${count} high-growth
 		{ targetEmail: 'tech@daily.co', targetName: 'Kwin Kramer', company: 'Daily.co', role: 'CEO', source: 'harvey' }
 	];
 
-	// Combine AI-scouted leads with the deep intelligence reservoir
 	const reservoir = campaignType === 'job_hunting' ? deepJobReservoir : deepClientReservoir;
 	for (const item of reservoir) {
 		if (!scoutedLeads.some(l => (l.targetEmail || '').toLowerCase() === item.targetEmail.toLowerCase())) {
@@ -807,10 +814,24 @@ Perform an exhaustive B2B market discovery scan. Find up to ${count} high-growth
 		}
 	}
 
-	// Filter, deduplicate against existing leads in outreach_lead, and insert
-	const validLeads = scoutedLeads.filter(l => l.targetEmail && l.targetEmail.includes('@'));
-	const addedLeads = [];
+	// Filter and validate every lead's MX records before queuing
+	const validLeads = [];
+	for (const lead of scoutedLeads) {
+		if (!lead.targetEmail || !lead.targetEmail.includes('@')) continue;
+		const domain = lead.targetEmail.split('@')[1];
+		if (!domain) continue;
 
+		// Verify MX records via Cloudflare DNS to guarantee deliverability
+		const hasMx = await verifyDomainMx(domain);
+		if (hasMx) {
+			validLeads.push(lead);
+		} else {
+			console.warn(`[Deliverability Gate] Dropped invalid domain with NO MX records: ${lead.targetEmail} (${lead.company})`);
+		}
+		if (validLeads.length >= count) break;
+	}
+
+	const addedLeads = [];
 	for (const lead of validLeads) {
 		const email = lead.targetEmail.trim().toLowerCase();
 		const existing = await db.prepare(
@@ -820,7 +841,7 @@ Perform an exhaustive B2B market discovery scan. Find up to ${count} high-growth
 		if (!existing) {
 			const name = (lead.targetName || email.split('@')[0] || '').trim();
 			const company = (lead.company || email.split('@')[1] || '').trim();
-			const source = campaignType === 'job_hunting' ? 'career_ops' : 'harvey';
+			const source = lead.source || (campaignType === 'job_hunting' ? 'career_ops' : 'harvey');
 
 			const tzInfo = detectLeadCountryAndTimezone({ targetEmail: email, company, role: lead.role });
 			await db.prepare(`
@@ -839,13 +860,6 @@ Perform an exhaustive B2B market discovery scan. Find up to ${count} high-growth
 		leads: addedLeads
 	};
 }
-// -----------------------------------------------------------------------------------------
-// Full Autonomous Auto Mode Orchestration Engine
-// Autonomously discovers jobs/clients from time to time, generates AI copy & dispatches
-// -----------------------------------------------------------------------------------------
-// -----------------------------------------------------------------------------------------
-// Country-Wise Preferable Business Hours & Timezone Engine
-// -----------------------------------------------------------------------------------------
 
 export function detectLeadCountryAndTimezone(lead) {
 	if (lead.timezone && lead.country) {
@@ -1047,8 +1061,8 @@ export async function executeFullAutoOutreachCycle(c, options = {}) {
 			const queuedJobsRes = await db.prepare(
 				`SELECT COUNT(*) as cnt FROM outreach_lead WHERE status = 'queued' AND campaign_id = 1`
 			).first();
-			// In deep search mode, proactively scout whenever buffer is under 15 leads
-			if ((queuedJobsRes?.cnt || 0) < 15 || options.isDeepSearch) {
+			// Proactively discover fresh live jobs whenever buffer is under 30 leads or on deep cycle
+			if ((queuedJobsRes?.cnt || 0) < 30 || options.isDeepSearch) {
 				const scoutRes = await scoutOpportunities(c, 'job_hunting', deepCount, true);
 				report.jobsDiscovered = scoutRes.added || 0;
 			}
@@ -1058,7 +1072,7 @@ export async function executeFullAutoOutreachCycle(c, options = {}) {
 			const queuedClientsRes = await db.prepare(
 				`SELECT COUNT(*) as cnt FROM outreach_lead WHERE status = 'queued' AND campaign_id = 2`
 			).first();
-			if ((queuedClientsRes?.cnt || 0) < 15 || options.isDeepSearch) {
+			if ((queuedClientsRes?.cnt || 0) < 30 || options.isDeepSearch) {
 				const scoutRes = await scoutOpportunities(c, 'service_outreach', deepCount, true);
 				report.clientsDiscovered = scoutRes.added || 0;
 			}
@@ -1464,6 +1478,7 @@ IMPORTANT: Output your entire response ONLY as a valid JSON object: {"subject": 
 				replied_count: Number(leadsStatsRes?.replied_count) || 0,
 				bounced_count: Math.max(Number(leadsStatsRes?.bounced_count) || 0, swarmTotalBounced)
 			},
+			unreadInboxCount: Number(await db.prepare("SELECT COUNT(*) as unread FROM email WHERE type = 0 AND status = 0 AND is_del = 0").first().then(r => r?.unread).catch(() => 0)),
 			deliverability,
 			accounts: accountsWithStats,
 			domains: {
@@ -2339,9 +2354,9 @@ app.get('/outreach/deliverability/health', async (c) => {
 	});
 });
 
-// 20. Pre-Flight Cold Email Spam Trigger Scanner
+// 20. Advanced Pre-Flight Cold Email Spam & Deliverability Inspector
 app.post('/outreach/deliverability/spam-check', async (c) => {
-	const { subject = '', body = '' } = await c.req.json();
+	const { subject = '', body = '', targetEmail = '' } = await c.req.json();
 
 	const spamTriggers = [
 		'100% free', '100% satisfied', 'act now', 'apply now', 'all natural', 'as seen on',
@@ -2368,11 +2383,57 @@ app.post('/outreach/deliverability/spam-check', async (c) => {
 	];
 
 	const detectedTriggers = [];
+	const suggestions = [];
 	const subLower = (subject || '').toLowerCase();
 	const bodyLower = (body || '').toLowerCase();
+	const combined = subLower + ' ' + bodyLower;
 
 	let spamScore = 0;
 
+	// Heuristic 1: Raw Cloud Storage Links (Google Drive / Dropbox / OneDrive) -> Phishing / Malware flag
+	const rawCloudDriveRegex = /(https?:\/\/)?(drive\.google\.com|docs\.google\.com|dropbox\.com|onedrive\.live\.com|box\.com|wetransfer\.com)[^\s]*/gi;
+	const cloudDriveMatches = (body + ' ' + subject).match(rawCloudDriveRegex);
+	if (cloudDriveMatches && cloudDriveMatches.length > 0) {
+		spamScore += 40;
+		detectedTriggers.push({
+			trigger: 'Raw Cloud Storage Share Link (' + cloudDriveMatches[0].slice(0, 35) + '...)',
+			location: 'Body',
+			penalty: 40,
+			severity: 'critical'
+		});
+		suggestions.push('CRITICAL: Remove raw Google Drive / cloud storage links! Google Workspace and Outlook filters automatically flag cold emails with raw file-share links as phishing hazards. Mention your GitHub or portfolio domain instead.');
+	}
+
+	// Heuristic 2: URL Shorteners (bit.ly, tinyurl, t.co)
+	const shortenerRegex = /(https?:\/\/)?(bit\.ly|tinyurl\.com|t\.co|cutt\.ly|ow\.ly)[^\s]*/gi;
+	const shortenerMatches = (body + ' ' + subject).match(shortenerRegex);
+	if (shortenerMatches && shortenerMatches.length > 0) {
+		spamScore += 35;
+		detectedTriggers.push({
+			trigger: 'URL Shortener Detected (' + shortenerMatches[0] + ')',
+			location: 'Body',
+			penalty: 35,
+			severity: 'high'
+		});
+		suggestions.push('Replace URL shorteners with direct, authentic domain links. Shorteners trigger automated SpamAssassin penalties.');
+	}
+
+	// Heuristic 3: Generic Blast Greetings
+	const genericGreetings = ['hi hiring team', 'dear hiring manager', 'dear sir', 'dear madam', 'to whom it may concern', 'i came across your company', 'hope this email finds you well'];
+	for (const g of genericGreetings) {
+		if (combined.includes(g)) {
+			spamScore += 20;
+			detectedTriggers.push({
+				trigger: 'Generic Blast Greeting ("' + g + '")',
+				location: 'Greeting',
+				penalty: 20,
+				severity: 'medium'
+			});
+			suggestions.push('Avoid generic blast salutations like "' + g + '". Address the person directly or start immediately with a technical hook.');
+		}
+	}
+
+	// Heuristic 4: Cold Sales Trigger Keywords
 	for (const trigger of spamTriggers) {
 		const inSubject = subLower.includes(trigger);
 		const inBody = bodyLower.includes(trigger);
@@ -2382,68 +2443,99 @@ app.post('/outreach/deliverability/spam-check', async (c) => {
 			detectedTriggers.push({
 				trigger,
 				location: inSubject && inBody ? 'Subject & Body' : (inSubject ? 'Subject' : 'Body'),
-				penalty: weight
+				penalty: weight,
+				severity: inSubject ? 'high' : 'medium'
 			});
 		}
 	}
 
-	// Punctuation & case analysis
+	// Heuristic 5: Excessive Punctuation & Dollar Signs
 	const excessiveExclamation = (subject + ' ' + body).match(/!{2,}/g);
 	if (excessiveExclamation) {
 		spamScore += 15;
-		detectedTriggers.push({ trigger: 'Multiple Exclamation Marks (!!)', location: 'Text', penalty: 15 });
+		detectedTriggers.push({ trigger: 'Multiple Exclamation Marks (!!)', location: 'Text', penalty: 15, severity: 'medium' });
+		suggestions.push('Avoid multiple exclamation marks; use clean professional sentence stops.');
 	}
 
 	const dollarSigns = (subject.match(/\$/g) || []).length;
 	if (dollarSigns > 0) {
 		spamScore += 15;
-		detectedTriggers.push({ trigger: 'Dollar Sign ($) in Subject', location: 'Subject', penalty: 15 });
+		detectedTriggers.push({ trigger: 'Dollar Sign ($) in Subject', location: 'Subject', penalty: 15, severity: 'medium' });
+		suggestions.push('Remove currency symbols from the subject line to avoid commercial promotional filtering.');
 	}
 
-	// Uppercase ratio check
+	// Heuristic 6: Excessive Capitalization
 	const words = (body || '').split(/\s+/).filter(Boolean);
 	const upperWords = words.filter(w => w.length > 2 && w === w.toUpperCase() && /[A-Z]/.test(w));
 	const upperRatio = words.length > 0 ? upperWords.length / words.length : 0;
-	if (upperRatio > 0.2 && words.length > 5) {
+	if (upperRatio > 0.15 && words.length > 5) {
 		spamScore += 20;
-		detectedTriggers.push({ trigger: 'Excessive All-Caps Words (> 20%)', location: 'Body', penalty: 20 });
+		detectedTriggers.push({ trigger: 'Excessive All-Caps Words (> 15%)', location: 'Body', penalty: 20, severity: 'high' });
+		suggestions.push('Avoid ALL-CAPS words. Write in natural sentence case.');
 	}
 
-	// Word count check
+	// Heuristic 7: Word Count Optimization
 	const wordCount = words.length;
-	const suggestions = [];
-
-	if (wordCount > 150) {
-		spamScore += 10;
-		suggestions.push(`Length is ${wordCount} words. Best practice cold outreach is 50–90 words for maximum replies and deliverability.`);
+	if (wordCount > 130) {
+		spamScore += 15;
+		suggestions.push('Email is ' + wordCount + ' words. Best practice cold email length is 50-85 words for maximum deliverability and replies.');
 	} else if (wordCount < 20 && wordCount > 0) {
 		spamScore += 10;
-		suggestions.push('Email is very short (< 20 words). Ensure there is sufficient personal context for the recipient.');
+		suggestions.push('Email is very brief (< 20 words). Provide a concise technical context.');
 	}
 
-	if (subject.length > 60) {
-		spamScore += 5;
-		suggestions.push('Subject line is over 60 characters. Keep subjects under 45 characters to display cleanly on mobile inboxes.');
-	}
-
-	if (detectedTriggers.length === 0) {
-		suggestions.push('Zero high-risk spam keywords detected. Copy is clean and personalized.');
-	} else {
-		suggestions.push('Remove or rephrase highlighted promotional buzzwords to bypass strict corporate spam gateways.');
+	// Heuristic 8: Target Recipient MX Check (if target email supplied)
+	let targetMxInfo = null;
+	if (targetEmail && targetEmail.includes('@')) {
+		const targetDomain = targetEmail.split('@')[1];
+		const hasMx = await verifyDomainMx(targetDomain);
+		targetMxInfo = {
+			domain: targetDomain,
+			hasMx,
+			status: hasMx ? 'Active MX Verified' : 'NO MX RECORDS (DEAD DOMAIN)'
+		};
+		if (!hasMx) {
+			spamScore += 50;
+			detectedTriggers.push({
+				trigger: 'Destination Domain has NO MX Records (' + targetDomain + ')',
+				location: 'Recipient',
+				penalty: 50,
+				severity: 'critical'
+			});
+			suggestions.push('CRITICAL: ' + targetDomain + ' has NO mail servers (MX records). Sending will result in a hard bounce, degrading your domain reputation.');
+		}
 	}
 
 	spamScore = Math.min(100, spamScore);
+
+	// Predicted Folder Placement
+	let predictedFolder = 'Primary Inbox';
+	let folderClass = 'primary';
+	if (spamScore > 40) {
+		predictedFolder = 'Spam / Junk Folder';
+		folderClass = 'spam';
+	} else if (spamScore > 18) {
+		predictedFolder = 'Promotions / Updates Tab';
+		folderClass = 'promotions';
+	}
 
 	let level = 'clean';
 	if (spamScore > 50) level = 'high_risk';
 	else if (spamScore > 25) level = 'moderate_risk';
 	else if (spamScore > 10) level = 'low_risk';
 
+	if (detectedTriggers.length === 0) {
+		suggestions.push('Excellent! Copy is clean, personal, and complies with modern inbox placement standards.');
+	}
+
 	return c.json({
 		code: 200,
 		data: {
 			spamScore,
 			level,
+			predictedFolder,
+			folderClass,
+			targetMxInfo,
 			detectedTriggers,
 			suggestions,
 			metrics: {
@@ -2529,5 +2621,288 @@ If this email arrived in your Primary Inbox, your sender reputation and DNS auth
 	return c.json({
 		code: 200,
 		message: `Diagnostic test email sent from ${acc.email} to ${testEmail}. Check your inbox or spam folder.`
+	});
+});
+
+// ============================================================================
+// 22. Master Inbox & Unified Inbound Reply Hub
+// ============================================================================
+
+// GET /outreach/inbox: List all inbound replies and emails across all 28 mailboxes
+app.get('/outreach/inbox', async (c) => {
+	const db = c.env.db;
+	const { page = 1, size = 50, domain, filter, search } = c.req.query();
+	const pageNum = Math.max(1, parseInt(page, 10) || 1);
+	const pageSize = Math.max(10, Math.min(100, parseInt(size, 10) || 50));
+	const offset = (pageNum - 1) * pageSize;
+
+	let sql = `
+		SELECT 
+			e.email_id,
+			e.send_email,
+			e.to_email,
+			e.name as sender_name,
+			e.subject,
+			e.text,
+			e.create_time,
+			e.status as email_status,
+			l.lead_id,
+			l.company,
+			l.target_name,
+			l.status as lead_status,
+			l.subject as sent_subject,
+			l.body as sent_body,
+			l.sent_time,
+			l.sender_email as original_sender_email,
+			c.campaign_id,
+			c.name as campaign_name,
+			c.type as campaign_type
+		FROM email e
+		LEFT JOIN outreach_lead l ON (
+			LOWER(TRIM(e.send_email)) = LOWER(TRIM(l.target_email)) 
+			OR e.email_id = l.reply_email_id
+			OR (
+				e.send_email LIKE '%@%' AND l.target_email LIKE '%@%'
+				AND SUBSTR(e.send_email, INSTR(e.send_email, '@') + 1) = SUBSTR(l.target_email, INSTR(l.target_email, '@') + 1)
+				AND l.status IN ('sent', 'replied')
+			)
+		)
+		LEFT JOIN campaign c ON l.campaign_id = c.campaign_id
+		WHERE e.type = 0 AND e.is_del = 0
+	`;
+
+	const params = [];
+
+	if (domain && domain !== 'all') {
+		sql += ` AND e.to_email LIKE ?`;
+		params.push(`%@${domain}`);
+	}
+
+	if (search && search.trim()) {
+		const s = `%${search.trim().toLowerCase()}%`;
+		sql += ` AND (LOWER(e.send_email) LIKE ? OR LOWER(e.subject) LIKE ? OR LOWER(COALESCE(l.company, '')) LIKE ? OR LOWER(COALESCE(e.text, '')) LIKE ?)`;
+		params.push(s, s, s, s);
+	}
+
+	sql += ` ORDER BY e.create_time DESC LIMIT ? OFFSET ?`;
+	params.push(pageSize, offset);
+
+	const rows = await db.prepare(sql).bind(...params).all().catch(err => {
+		console.error('Error fetching master inbox:', err);
+		return { results: [] };
+	});
+
+	// Get count of unread and prospect replies
+	const [countRes, prospectRepliesRes] = await Promise.all([
+		db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END), 0) as unread FROM email WHERE type = 0 AND is_del = 0`).first().catch(() => ({ total: 0, unread: 0 })),
+		db.prepare(`SELECT COUNT(*) as total FROM outreach_lead WHERE status = 'replied'`).first().catch(() => ({ total: 0 }))
+	]);
+
+	// Enrich each item with classification tag
+	const items = (rows.results || []).map(r => {
+		const txt = (r.text || '').toLowerCase();
+		const subj = (r.subject || '').toLowerCase();
+		let intent = 'general';
+
+		if (txt.includes('ticket') || txt.includes('t-j') || txt.includes('support assistant') || txt.includes('help center') || txt.includes('careers page') || txt.includes('apply at')) {
+			intent = 'ticket';
+		} else if (txt.includes('interview') || txt.includes('chat') || txt.includes('calendly') || txt.includes('call') || txt.includes('meet') || txt.includes('available') || txt.includes('portfolio') || txt.includes('resume')) {
+			intent = 'interview';
+		} else if (txt.includes('interested') || txt.includes('tell me more') || txt.includes('rates') || txt.includes('proposal') || txt.includes('pricing')) {
+			intent = 'interested';
+		} else if (txt.includes('unsubscribe') || txt.includes('remove') || txt.includes('not interested') || txt.includes('no thank')) {
+			intent = 'uninterested';
+		} else if (r.lead_id) {
+			intent = 'prospect_reply';
+		}
+
+		return {
+			...r,
+			intent,
+			isProspect: Boolean(r.lead_id)
+		};
+	});
+
+	return c.json({
+		code: 200,
+		data: {
+			items,
+			total: countRes?.total || 0,
+			unread: countRes?.unread || 0,
+			prospectReplies: prospectRepliesRes?.total || 0,
+			page: pageNum,
+			size: pageSize
+		}
+	});
+});
+
+// GET /outreach/inbox/thread/:emailId: View conversation thread
+app.get('/outreach/inbox/thread/:emailId', async (c) => {
+	const db = c.env.db;
+	const emailId = parseInt(c.req.param('emailId'), 10);
+	if (!emailId) throw new BizError('Invalid email ID');
+
+	const emailRow = await db.prepare(`
+		SELECT e.*, a.account_id 
+		FROM email e 
+		LEFT JOIN account a ON e.to_email = a.email
+		WHERE e.email_id = ? AND e.is_del = 0
+	`).bind(emailId).first();
+
+	if (!emailRow) throw new BizError('Email not found');
+
+	// Find matched lead
+	const lead = await db.prepare(`
+		SELECT l.*, c.name as campaign_name, c.type as campaign_type
+		FROM outreach_lead l
+		JOIN campaign c ON l.campaign_id = c.campaign_id
+		WHERE LOWER(TRIM(l.target_email)) = LOWER(TRIM(?))
+		   OR l.reply_email_id = ?
+		   OR (
+		     l.target_email LIKE '%@%' AND ? LIKE '%@%'
+		     AND SUBSTR(l.target_email, INSTR(l.target_email, '@') + 1) = SUBSTR(?, INSTR(?, '@') + 1)
+		     AND l.status IN ('sent', 'replied')
+		   )
+		ORDER BY l.sent_time DESC LIMIT 1
+	`).bind(emailRow.send_email, emailId, emailRow.send_email, emailRow.send_email, emailRow.send_email).first().catch(() => null);
+
+	// Mark email as read
+	await db.prepare(`UPDATE email SET status = 1 WHERE email_id = ?`).bind(emailId).run().catch(() => {});
+
+	return c.json({
+		code: 200,
+		data: {
+			inbound: emailRow,
+			matchedLead: lead,
+			originalOutbound: lead?.body ? { subject: lead.subject, body: lead.body, sentTime: lead.sent_time, sender: lead.sender_email } : null
+		}
+	});
+});
+
+// POST /outreach/inbox/reply: Send a direct response from the receiving mailbox
+app.post('/outreach/inbox/reply', async (c) => {
+	const db = c.env.db;
+	const { emailId, toEmail, subject, text } = await c.req.json();
+
+	if (!toEmail || !text || !text.trim()) {
+		throw new BizError('Recipient email and reply text are required');
+	}
+
+	const original = await db.prepare(`SELECT to_email, send_email, subject, name FROM email WHERE email_id = ?`).bind(emailId).first();
+	const fromEmail = original?.to_email;
+
+	const account = await db.prepare(`SELECT account_id, email, name FROM account WHERE email = ? AND is_del = 0`).bind(fromEmail).first();
+	if (!account) {
+		throw new BizError(`Sending account for ${fromEmail} not found`);
+	}
+
+	const replySubject = subject || (original?.subject?.startsWith('Re:') ? original.subject : `Re: ${original?.subject || 'Follow-up'}`);
+	const formattedHtml = `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: #111; line-height: 1.6;">${text.replace(/\n/g, '<br/>')}</div>`;
+
+	await emailService.send(c, {
+		accountId: account.account_id,
+		receiveEmail: [toEmail.trim()],
+		name: 'Tasin Sohad',
+		subject: replySubject,
+		text: text.trim(),
+		content: formattedHtml,
+		sendType: 'reply',
+		outreachSource: 'master_inbox_reply',
+		replyEmailId: emailId,
+		attachments: []
+	}, 1);
+
+	// Update lead status to replied if linked
+	await db.prepare(`
+		UPDATE outreach_lead 
+		SET status = 'replied', reply_time = CURRENT_TIMESTAMP 
+		WHERE target_email = ? OR reply_email_id = ?
+	`).bind(toEmail.trim().toLowerCase(), emailId).run().catch(() => {});
+
+	return c.json({
+		code: 200,
+		message: `Reply dispatched from ${account.email} to ${toEmail}`
+	});
+});
+
+// POST /outreach/inbox/ai-reply-draft: AI drafts a smart contextual reply
+app.post('/outreach/inbox/ai-reply-draft', async (c) => {
+	const { prospectEmail, prospectMessage, company, subject } = await c.req.json();
+
+	const systemPrompt = `You are Tasin Sohad, a Senior Full-Stack & Autonomous AI Systems Engineer writing a direct, thoughtful reply to a prospect or hiring manager.
+CORE RULES:
+1. Always write as ME (Tasin Sohad: 'I', 'my'). Speak peer-to-peer.
+2. Acknowledge what they wrote naturally.
+3. If they asked to apply on a portal or careers page (like a ticketing assistant), thank them, confirm application, and politely ask if there is a direct engineering manager/CTO you can connect with.
+4. If they asked for a portfolio, provide github.com/tasinsohad and offer a 2-minute live demo of your agent architecture.
+5. If they suggested a call or interview, offer your direct scheduling availability (EST/CET/GMT).
+6. Under 80 words. Never include raw Google Drive links or spam phrases.
+7. Sign off: Best,\nTasin Sohad`;
+
+	const userPrompt = `Prospect Email: ${prospectEmail}
+Company: ${company || 'their team'}
+Subject: ${subject}
+Incoming Message:
+${prospectMessage || '(no message content)'}
+
+Draft a crisp, high-converting first-person response from Tasin Sohad. Output plain text reply only.`;
+
+	let replyText = '';
+	try {
+		const activeLlms = await c.env.db.prepare(`SELECT * FROM llm_config WHERE is_active = 1 ORDER BY priority ASC LIMIT 1`).all();
+		const topLlm = activeLlms?.results?.[0];
+		if (topLlm && (topLlm.api_key || topLlm.provider === 'custom')) {
+			replyText = await executeProviderChat(
+				topLlm.provider,
+				topLlm.api_key,
+				topLlm.base_url,
+				topLlm.selected_model,
+				systemPrompt,
+				userPrompt,
+				15000
+			);
+		}
+	} catch (e) {
+		console.warn('AI reply generation fallback:', e.message);
+	}
+
+	if (!replyText || !replyText.trim()) {
+		replyText = `Hi there,\n\nThanks for getting back to me! I appreciate the response.\n\nI would love to connect briefly or share a quick 2-minute demo of the autonomous systems and full-stack pipelines I build (github.com/tasinsohad).\n\nAre you free for a brief 5-minute chat this week?\n\nBest,\nTasin Sohad`;
+	}
+
+	return c.json({
+		code: 200,
+		data: { reply: replyText.trim() }
+	});
+});
+
+// POST /outreach/purge-dead-leads: Removes queued leads whose domains have NO MX records
+app.post('/outreach/purge-dead-leads', async (c) => {
+	const db = c.env.db;
+	const queued = await db.prepare(`SELECT lead_id, target_email, company FROM outreach_lead WHERE status = 'queued'`).all();
+	const list = queued?.results || [];
+
+	const deadIds = [];
+	for (const item of list) {
+		const domain = (item.target_email || '').split('@')[1];
+		if (!domain) {
+			deadIds.push(item.lead_id);
+			continue;
+		}
+		const hasMx = await verifyDomainMx(domain);
+		if (!hasMx) {
+			deadIds.push(item.lead_id);
+		}
+	}
+
+	if (deadIds.length > 0) {
+		const placeholders = deadIds.map(() => '?').join(',');
+		await db.prepare(`DELETE FROM outreach_lead WHERE lead_id IN (${placeholders})`).bind(...deadIds).run();
+	}
+
+	return c.json({
+		code: 200,
+		message: `Scanned ${list.length} queued leads. Purged ${deadIds.length} dead leads with no MX records.`,
+		data: { scanned: list.length, purged: deadIds.length }
 	});
 });

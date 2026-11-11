@@ -24,55 +24,77 @@ function escapeHtml(text = '') {
 const telegramService = {
 
 	async getEmailContent(c, params) {
-
-		const { token } = params
-
-		const result = await jwtUtils.verifyToken(c, token);
-
-		if (!result) {
-			return emailTextTemplate('Access denied')
-		}
-
-		const emailRow = await orm(c).select().from(email).where(eq(email.emailId, result.emailId)).get();
-
-		if (emailRow) {
-
-			if (emailRow.content) {
-				const { r2Domain } = await settingService.query(c);
-				return emailHtmlTemplate(emailRow.content || '', r2Domain)
-			} else {
-				return emailTextTemplate(emailRow.text || '')
+		const { emailId } = params;
+		const emailRow = await orm(c).select().from(email).where(eq(email.emailId, emailId)).get();
+		if (!emailRow) {
+			return {
+				isHtml: false,
+				content: ''
 			}
-
-		} else {
-			return emailTextTemplate('The email does not exist')
 		}
-
+		if (verifyUtils.isHtml(emailRow.content)) {
+			return {
+				isHtml: true,
+				content: emailRow.content
+			}
+		}
+		return {
+			isHtml: false,
+			content: emailRow.text
+		}
 	},
 
 	async sendEmailToBot(c, email) {
 
-		const { tgBotToken, tgChatId, customDomain, tgMsgTo, tgMsgFrom, tgMsgText } = await settingService.query(c);
+		const setting = await settingService.query(c);
 
-		if (!tgBotToken || !tgChatId) {
+		const { tgBotToken, tgChatId, customDomain, tgBotStatus } = setting;
+
+		if (!tgBotToken || !tgChatId || !tgBotStatus) {
 			return;
 		}
 
 		const tgChatIds = tgChatId.split(',').map(s => s.trim()).filter(Boolean);
 		if (tgChatIds.length === 0) return;
 
-		// Detect if this inbound email matches an outreach lead
+		// Detect if this inbound email matches an outreach lead (multi-tier matching)
 		let leadInfo = null;
 		if (c.env?.db && email.sendEmail) {
 			try {
 				const cleanFrom = email.sendEmail.toLowerCase().trim();
+				const fromDomain = cleanFrom.includes('@') ? cleanFrom.split('@')[1] : '';
+				const cleanSubj = (email.subject || '').replace(/^(re|fwd|aw|r):\s*/i, '').trim().toLowerCase();
+
+				// Tier 1: Exact sender match
 				leadInfo = await c.env.db.prepare(`
 					SELECT l.lead_id, l.target_email, l.target_name, l.company, l.source, c.name as campaign_name, c.type as campaign_type
 					FROM outreach_lead l
 					JOIN campaign c ON l.campaign_id = c.campaign_id
-					WHERE LOWER(l.target_email) = ?
+					WHERE LOWER(TRIM(l.target_email)) = ?
 					ORDER BY l.lead_id DESC LIMIT 1
 				`).bind(cleanFrom).first();
+
+				// Tier 2: Subject thread match (e.g. "Re: Quick intro: Tasin Sohad")
+				if (!leadInfo && cleanSubj.length > 8) {
+					leadInfo = await c.env.db.prepare(`
+						SELECT l.lead_id, l.target_email, l.target_name, l.company, l.source, c.name as campaign_name, c.type as campaign_type
+						FROM outreach_lead l
+						JOIN campaign c ON l.campaign_id = c.campaign_id
+						WHERE l.status IN ('sent', 'queued') AND LOWER(TRIM(l.subject)) LIKE ?
+						ORDER BY l.sent_time DESC, l.lead_id DESC LIMIT 1
+					`).bind(`%${cleanSubj}%`).first();
+				}
+
+				// Tier 3: Domain alias match (e.g. hi@cursor.com replies to careers@cursor.com)
+				if (!leadInfo && fromDomain && !['gmail.com', 'outlook.com', 'yahoo.com', 'hotmail.com', 'icloud.com'].includes(fromDomain)) {
+					leadInfo = await c.env.db.prepare(`
+						SELECT l.lead_id, l.target_email, l.target_name, l.company, l.source, c.name as campaign_name, c.type as campaign_type
+						FROM outreach_lead l
+						JOIN campaign c ON l.campaign_id = c.campaign_id
+						WHERE l.status = 'sent' AND LOWER(TRIM(l.target_email)) LIKE ?
+						ORDER BY l.sent_time DESC, l.lead_id DESC LIMIT 1
+					`).bind(`%@${fromDomain}`).first();
+				}
 
 				if (leadInfo) {
 					await c.env.db.prepare(`
@@ -90,6 +112,7 @@ const telegramService = {
 		const webAppUrl = customDomain ? `${domainUtils.toOssDomain(customDomain)}/api/telegram/getEmail/${jwtToken}` : 'https://www.cloudflare.com/404';
 		const appBaseUrl = customDomain ? domainUtils.toOssDomain(customDomain) : 'https://cloud-mail.sohad-flowtics.workers.dev';
 		const directReplyUrl = `${appBaseUrl}/#/inbox?emailId=${email.emailId}&reply=1`;
+		const masterInboxUrl = `${appBaseUrl}/#/outreach?tab=inbox`;
 
 		const inlineKeyboard = [
 			[
@@ -98,59 +121,82 @@ const telegramService = {
 					web_app: { url: webAppUrl }
 				},
 				{
-					text: '✉️ Reply in Cloud Mailreach',
-					url: directReplyUrl
+					text: leadInfo ? '💬 Open Master Inbox & Reply' : '✉️ Reply Email',
+					url: leadInfo ? masterInboxUrl : directReplyUrl
 				}
 			]
 		];
 
-		if (email.code) {
-			inlineKeyboard.push([
-				{
-					text: email.code,
-					copy_text: { text: email.code }
-				}
-			]);
-		}
+		const date = dayjs(email.createTime).tz(c.env.time_zone || 'Asia/Shanghai').format('YYYY-MM-DD HH:mm:ss');
 
-		let messageText = emailMsgTemplate(email, tgMsgTo, tgMsgFrom, tgMsgText);
-
+		// Rich alert header: highlights if this is a prospect reply
+		let alertPrefix = '';
 		if (leadInfo) {
-			const isCareer = leadInfo.campaign_type === 'career_ops';
-			const badge = isCareer ? '🎯 JOB PROSPECT REPLY' : '🚀 CLIENT PROSPECT REPLY';
-			const alertHeader = `🚨 <b>【${badge}】</b>\n` +
-				`<b>Campaign:</b> ${escapeHtml(leadInfo.campaign_name)}\n` +
-				`<b>Lead:</b> ${escapeHtml(leadInfo.target_name || leadInfo.target_email)}${leadInfo.company ? ` (${escapeHtml(leadInfo.company)})` : ''}\n` +
-				`------------------------------------\n`;
-			messageText = alertHeader + messageText;
+			const badge = leadInfo.campaign_type === 'job_hunting' ? '💼 CAREER-OPS (JOBS)' : '🎯 HARVEY (CLIENTS)';
+			alertPrefix = `🎉 <b>[PROSPECT REPLY RECEIVED!]</b>\n` +
+				`━━━━━━━━━━━━━━━━━━━\n` +
+				`📌 <b>Engine:</b> ${badge}\n` +
+				`🏢 <b>Company:</b> ${leadInfo.company || 'N/A'}\n` +
+				`👤 <b>Contact:</b> ${leadInfo.target_name || leadInfo.target_email}\n` +
+				`━━━━━━━━━━━━━━━━━━━\n\n`;
 		}
+
+		const fullMsg = alertPrefix + emailMsgTemplate({
+			sendEmail: email.sendEmail,
+			toEmail: email.toEmail,
+			subject: email.subject,
+			date: date,
+			text: email.text || email.content || ''
+		});
 
 		await Promise.all(tgChatIds.map(async chatId => {
 			try {
-				const res = await fetch(`https://api.telegram.org/bot${tgBotToken}/sendMessage`, {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json'
-					},
-					body: JSON.stringify({
-						chat_id: chatId,
-						parse_mode: 'HTML',
-						text: messageText,
-						reply_markup: {
-							inline_keyboard: inlineKeyboard
+				let sendSuccess = false;
+				for (let attempt = 0; attempt < 2; attempt++) {
+					try {
+						const res = await fetch(`https://api.telegram.org/bot${tgBotToken}/sendMessage`, {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({
+								chat_id: chatId,
+								parse_mode: 'HTML',
+								text: fullMsg,
+								reply_markup: { inline_keyboard: inlineKeyboard }
+							})
+						});
+						if (res.ok) {
+							sendSuccess = true;
+							break;
 						}
-					})
-				});
-				if (!res.ok) {
-					console.error(`Telegram send failed status: ${res.status} response: ${await res.text()}`);
+					} catch (fetchErr) {
+						if (attempt === 1) throw fetchErr;
+						await new Promise(r => setTimeout(r, 600));
+					}
 				}
-			} catch (e) {
-				console.error(`Telegram send error:`, e.message);
+				if (!sendSuccess) {
+					// Fallback to plain text if HTML parsing fails
+					const textFallback = alertPrefix.replace(/<[^>]+>/g, '') + emailTextTemplate({
+						sendEmail: email.sendEmail,
+						toEmail: email.toEmail,
+						subject: email.subject,
+						date: date,
+						text: email.text || email.content || ''
+					});
+					await fetch(`https://api.telegram.org/bot${tgBotToken}/sendMessage`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							chat_id: chatId,
+							text: textFallback,
+							reply_markup: { inline_keyboard: inlineKeyboard }
+						})
+					});
+				}
+			} catch (err) {
+				console.error(`Failed to send Telegram message to ${chatId}:`, err);
 			}
 		}));
-
 	}
-
-}
+};
 
 export default telegramService;
