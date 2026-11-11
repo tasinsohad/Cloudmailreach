@@ -1065,7 +1065,8 @@ const emailService = {
 		for (const emailRow of emailRowList) {
 
 			//转发到TG
-			if (tgBotStatus === settingConst.tgBotStatus.OPEN && tgChatId) {
+			const isTgEnabled = tgBotStatus === settingConst.tgBotStatus.OPEN || tgBotStatus === 0 || tgBotStatus === 1 || tgBotStatus === true;
+			if (isTgEnabled && tgChatId) {
 				await telegramService.sendEmailToBot(c, emailRow);
 			}
 

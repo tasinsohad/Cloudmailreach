@@ -50,7 +50,9 @@ const telegramService = {
 
 		const { tgBotToken, tgChatId, customDomain, tgBotStatus } = setting;
 
-		if (!tgBotToken || !tgChatId || !tgBotStatus) {
+		// Enable notification if token & chat ID are present and status is OPEN (0) or 1
+		const isBotActive = tgBotStatus === 0 || tgBotStatus === '0' || tgBotStatus === 1 || tgBotStatus === true;
+		if (!tgBotToken || !tgChatId || !isBotActive) {
 			return;
 		}
 

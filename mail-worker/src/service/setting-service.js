@@ -15,10 +15,18 @@ const settingService = {
 
 	async refresh(c) {
 		const settingRow = await orm(c).select().from(setting).get();
-		settingRow.resendTokens = JSON.parse(settingRow.resendTokens);
+		if (!settingRow) return null;
+		try {
+			settingRow.resendTokens = typeof settingRow.resendTokens === 'string' ? JSON.parse(settingRow.resendTokens) : (settingRow.resendTokens || {});
+		} catch {
+			settingRow.resendTokens = {};
+		}
 		settingRow.r2Domain = '';
-		c.set('setting', settingRow);
-		await c.env.kv.put(KvConst.SETTING, JSON.stringify(settingRow));
+		c.set?.('setting', settingRow);
+		if (c.env?.kv) {
+			await c.env.kv.put(KvConst.SETTING, JSON.stringify(settingRow));
+		}
+		return settingRow;
 	},
 
 	async query(c) {
@@ -27,7 +35,14 @@ const settingService = {
 			return c.get('setting')
 		}
 
-		const setting = await c.env.kv.get(KvConst.SETTING, { type: 'json' });
+		let setting = null;
+		if (c.env?.kv) {
+			setting = await c.env.kv.get(KvConst.SETTING, { type: 'json' });
+		}
+
+		if (!setting) {
+			setting = await this.refresh(c);
+		}
 
 		if (!setting) {
 			throw new BizError('数据库未初始化 Database not initialized.');

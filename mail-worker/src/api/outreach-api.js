@@ -2068,6 +2068,33 @@ app.post('/outreach/llm/test-provider', async (c) => {
 	});
 });
 
+app.post('/outreach/telegram/update', async (c) => {
+	const db = c.env.db;
+	const { tgBotToken, tgChatId } = await c.req.json();
+	const token = (tgBotToken || '').trim();
+	const chatId = (tgChatId || '').trim();
+
+	if (!token || !chatId) {
+		throw new BizError('Both Telegram Bot Token and Chat ID are required');
+	}
+
+	await db.prepare(`
+		UPDATE setting 
+		SET tg_bot_token = ?, tg_chat_id = ?, tg_bot_status = 0
+	`).bind(token, chatId).run();
+
+	try {
+		await settingService.refresh(c);
+	} catch (e) {
+		console.warn('Could not refresh setting KV cache:', e);
+	}
+
+	return c.json({
+		code: 200,
+		message: 'Telegram settings saved successfully and notifications armed!'
+	});
+});
+
 app.post('/outreach/telegram/test', async (c) => {
 	const { tgBotToken, tgChatId } = await c.req.json();
 
