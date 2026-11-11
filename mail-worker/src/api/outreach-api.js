@@ -636,6 +636,7 @@ export async function verifyDomainMx(domain) {
 // -----------------------------------------------------------------------------------------
 export async function fetchRealLiveJobs() {
 	const realJobs = [];
+	const techRoleRegex = /engineer|developer|architect|full-stack|backend|frontend|ai|systems|devops|data|software|cloud|platform|infrastructure/i;
 
 	// Source 1: Hacker News "Who is Hiring" Live Monthly Thread
 	try {
@@ -646,7 +647,7 @@ export async function fetchRealLiveJobs() {
 			if (latestPostId) {
 				const postRes = await fetch(`https://hacker-news.firebaseio.com/v0/item/${latestPostId}.json`);
 				const post = await postRes.json();
-				const kids = (post.kids || []).slice(0, 35);
+				const kids = (post.kids || []).slice(0, 40);
 				for (const kid of kids) {
 					try {
 						const commentRes = await fetch(`https://hacker-news.firebaseio.com/v0/item/${kid}.json`);
@@ -677,7 +678,7 @@ export async function fetchRealLiveJobs() {
 
 	// Source 2: Jobicy Remote Engineering Jobs API
 	try {
-		const jRes = await fetch('https://jobicy.com/api/v2/remote-jobs?count=25&industry=engineering');
+		const jRes = await fetch('https://jobicy.com/api/v2/remote-jobs?count=30&industry=engineering');
 		if (jRes.ok) {
 			const jData = await jRes.json();
 			for (const item of (jData.jobs || [])) {
@@ -707,7 +708,7 @@ export async function fetchRealLiveJobs() {
 		});
 		if (rRes.ok) {
 			const rData = await rRes.json();
-			const devJobs = (Array.isArray(rData) ? rData : []).filter(j => j.id && j.company).slice(0, 20);
+			const devJobs = (Array.isArray(rData) ? rData : []).filter(j => j.id && j.company && techRoleRegex.test(j.position || '')).slice(0, 25);
 			for (const item of devJobs) {
 				const company = item.company;
 				const role = item.position;
@@ -726,6 +727,119 @@ export async function fetchRealLiveJobs() {
 		}
 	} catch (e) {
 		console.warn('[Real Job Scout] RemoteOK error:', e.message);
+	}
+
+	// Source 4: Remotive Software Development Jobs API
+	try {
+		const rmRes = await fetch('https://remotive.com/api/remote-jobs?category=software-dev&limit=30', {
+			headers: { 'User-Agent': 'CloudMailreach/1.0' }
+		});
+		if (rmRes.ok) {
+			const rmData = await rmRes.json();
+			for (const item of (rmData.jobs || [])) {
+				const company = item.company_name;
+				const role = item.title;
+				if (company && techRoleRegex.test(role || '')) {
+					const cleanComp = company.toLowerCase().replace(/[^a-z0-9]/g, '');
+					realJobs.push({
+						targetEmail: `careers@${cleanComp}.com`,
+						targetName: `${company} Talent Team`,
+						company: company,
+						role: role,
+						source: 'remotive',
+						jobUrl: item.url
+					});
+				}
+			}
+		}
+	} catch (e) {
+		console.warn('[Real Job Scout] Remotive error:', e.message);
+	}
+
+	// Source 5: Arbeitnow Global Tech Jobs API
+	try {
+		const abRes = await fetch('https://www.arbeitnow.com/api/job-board-api', {
+			headers: { 'User-Agent': 'CloudMailreach/1.0' }
+		});
+		if (abRes.ok) {
+			const abData = await abRes.json();
+			for (const item of (abData.data || []).slice(0, 35)) {
+				const company = item.company_name;
+				const role = item.title;
+				if (company && techRoleRegex.test(role || '')) {
+					const cleanComp = company.toLowerCase().replace(/[^a-z0-9]/g, '');
+					realJobs.push({
+						targetEmail: `jobs@${cleanComp}.com`,
+						targetName: `${company} Hiring Team`,
+						company: company,
+						role: role,
+						source: 'arbeitnow',
+						jobUrl: item.url
+					});
+				}
+			}
+		}
+	} catch (e) {
+		console.warn('[Real Job Scout] Arbeitnow error:', e.message);
+	}
+
+	// Source 6: We Work Remotely Programming RSS Feed
+	try {
+		const wwrRes = await fetch('https://weworkremotely.com/categories/remote-programming-jobs.rss', {
+			headers: { 'User-Agent': 'CloudMailreach/1.0' }
+		});
+		if (wwrRes.ok) {
+			const text = await wwrRes.text();
+			const items = [...text.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 35);
+			for (const it of items) {
+				const rawTitle = it[1].match(/<title>([\s\S]*?)<\/title>/)?.[1] || '';
+				const cleanTitle = rawTitle.replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+				const parts = cleanTitle.split(':');
+				if (parts.length >= 2) {
+					const company = parts[0].trim();
+					const role = parts.slice(1).join(':').trim();
+					if (company && techRoleRegex.test(role)) {
+						const cleanComp = company.toLowerCase().replace(/[^a-z0-9]/g, '');
+						realJobs.push({
+							targetEmail: `careers@${cleanComp}.com`,
+							targetName: `${company} Talent Team`,
+							company: company,
+							role: role,
+							source: 'weworkremotely'
+						});
+					}
+				}
+			}
+		}
+	} catch (e) {
+		console.warn('[Real Job Scout] WWR error:', e.message);
+	}
+
+	// Source 7: Himalayas Remote Tech Jobs API
+	try {
+		const hRes = await fetch('https://himalayas.app/jobs/api?limit=30', {
+			headers: { 'User-Agent': 'CloudMailreach/1.0' }
+		});
+		if (hRes.ok) {
+			const hData = await hRes.json();
+			for (const item of (hData.jobs || [])) {
+				const company = item.companyName;
+				const role = item.title;
+				if (company && techRoleRegex.test(role || '')) {
+					const cleanComp = company.toLowerCase().replace(/[^a-z0-9]/g, '');
+					realJobs.push({
+						targetEmail: `careers@${cleanComp}.com`,
+						targetName: `${company} Talent Team`,
+						company: company,
+						role: role,
+						source: 'himalayas',
+						jobUrl: item.applicationUrl || item.companyUrl
+					});
+				}
+			}
+		}
+	} catch (e) {
+		console.warn('[Real Job Scout] Himalayas error:', e.message);
 	}
 
 	return realJobs;
@@ -782,7 +896,17 @@ export async function scoutOpportunities(c, type = 'service_outreach', count = 2
 		{ targetEmail: 'talent@mistral.ai', targetName: 'Mistral AI Team', company: 'Mistral AI', role: 'AI Developer Platform Engineer', source: 'career_ops' },
 		{ targetEmail: 'jobs@runpod.io', targetName: 'RunPod Hiring', company: 'RunPod', role: 'GPU Cloud Software Engineer', source: 'career_ops' },
 		{ targetEmail: 'hiring@groq.com', targetName: 'Groq Talent Team', company: 'Groq', role: 'LPU Cloud Solutions Engineer', source: 'career_ops' },
-		{ targetEmail: 'careers@fireworks.ai', targetName: 'Fireworks AI People', company: 'Fireworks AI', role: 'Model Serving Infrastructure Engineer', source: 'career_ops' }
+		{ targetEmail: 'careers@fireworks.ai', targetName: 'Fireworks AI People', company: 'Fireworks AI', role: 'Model Serving Infrastructure Engineer', source: 'career_ops' },
+		{ targetEmail: 'careers@anthropic.com', targetName: 'Anthropic Talent', company: 'Anthropic', role: 'Distributed Systems & AI Engineer', source: 'career_ops' },
+		{ targetEmail: 'careers@perplexity.ai', targetName: 'Perplexity Hiring', company: 'Perplexity AI', role: 'AI Search & Systems Engineer', source: 'career_ops' },
+		{ targetEmail: 'talent@scale.com', targetName: 'Scale AI People', company: 'Scale AI', role: 'Autonomous Data Engine Engineer', source: 'career_ops' },
+		{ targetEmail: 'jobs@huggingface.co', targetName: 'Hugging Face Team', company: 'Hugging Face', role: 'Open Source ML Systems Engineer', source: 'career_ops' },
+		{ targetEmail: 'hiring@braintrust.com', targetName: 'Braintrust Talent', company: 'Braintrust', role: 'AI Evaluation & Infra Engineer', source: 'career_ops' },
+		{ targetEmail: 'careers@vercel.com', targetName: 'Vercel Engineering', company: 'Vercel', role: 'Edge Compute & Framework Engineer', source: 'career_ops' },
+		{ targetEmail: 'jobs@render.com', targetName: 'Render Hiring', company: 'Render', role: 'Cloud Infrastructure Engineer', source: 'career_ops' },
+		{ targetEmail: 'jobs@fly.io', targetName: 'Fly.io Team', company: 'Fly.io', role: 'Distributed Systems Engineer', source: 'career_ops' },
+		{ targetEmail: 'careers@neon.tech', targetName: 'Neon Talent', company: 'Neon', role: 'Serverless Postgres Systems Engineer', source: 'career_ops' },
+		{ targetEmail: 'jobs@railway.app', targetName: 'Railway Team', company: 'Railway', role: 'Cloud Infrastructure Platform Engineer', source: 'career_ops' }
 	];
 
 	const deepClientReservoir = [
@@ -804,7 +928,21 @@ export async function scoutOpportunities(c, type = 'service_outreach', count = 2
 		{ targetEmail: 'tech@liveblocks.io', targetName: 'Steven Fabre', company: 'Liveblocks', role: 'CEO', source: 'harvey' },
 		{ targetEmail: 'founders@polar.sh', targetName: 'Birk Jernstrom', company: 'Polar', role: 'CEO', source: 'harvey' },
 		{ targetEmail: 'founders@openphone.com', targetName: 'Mahyar Raissi', company: 'OpenPhone', role: 'CEO', source: 'harvey' },
-		{ targetEmail: 'tech@daily.co', targetName: 'Kwin Kramer', company: 'Daily.co', role: 'CEO', source: 'harvey' }
+		{ targetEmail: 'tech@daily.co', targetName: 'Kwin Kramer', company: 'Daily.co', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'founders@supabase.com', targetName: 'Paul Copplestone', company: 'Supabase', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'product@vercel.com', targetName: 'Guillermo Rauch', company: 'Vercel', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'james@posthog.com', targetName: 'James Hawkins', company: 'PostHog', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'founders@render.com', targetName: 'Anurag Goel', company: 'Render', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'team@neon.tech', targetName: 'Nikita Shamgunov', company: 'Neon', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'team@fly.io', targetName: 'Kurt Mackey', company: 'Fly.io', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'team@railway.app', targetName: 'Jake Cooper', company: 'Railway', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'team@modal.com', targetName: 'Erik Bernhardsson', company: 'Modal Labs', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'team@langchain.dev', targetName: 'Harrison Chase', company: 'LangChain', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'team@replicate.com', targetName: 'Ben Firshman', company: 'Replicate', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'founders@pinecone.io', targetName: 'Edo Liberty', company: 'Pinecone', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'founders@perplexity.ai', targetName: 'Aravind Srinivas', company: 'Perplexity AI', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'founders@groq.com', targetName: 'Jonathan Ross', company: 'Groq', role: 'CEO', source: 'harvey' },
+		{ targetEmail: 'founders@vapi.ai', targetName: 'Jordan Singer', company: 'Vapi AI', role: 'Founder', source: 'harvey' }
 	];
 
 	const reservoir = campaignType === 'job_hunting' ? deepJobReservoir : deepClientReservoir;
